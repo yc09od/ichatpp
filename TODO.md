@@ -8,7 +8,7 @@
 
 ## 阶段 0：项目初始化
 
--- [1] [ ] **初始化仓库与目录结构**
+-- [1] [x] **初始化仓库与目录结构**
   - AI 指令：根据 ARCHITECTURE.md 第 3 节生成完整目录骨架（`frontend/`, `backend/`, `docs/`, `.github/workflows/`），添加 `.gitignore`（覆盖 `node_modules`, `target`, `.env`, `.next`, `dist`），添加 MIT `LICENSE`
   - 验收标准：`tree -L 3` 输出与 ARCHITECTURE.md 第 3 节一致
 
@@ -267,4 +267,4 @@
 ---
 
 *最后更新：2026-05-07*
-*下一个待处理任务：[1] 初始化仓库与目录结构*
+*下一个待处理任务：[2] 生成 docker-compose.yml（开发环境）*
