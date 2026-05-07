@@ -68,7 +68,7 @@
   - AI 指令：在 `backend/src/handlers/invitations.rs` 实现：(1) 邀请码生成器：使用 `rand::rngs::OsRng` 产生 20 位字符（base62 字符集），格式 `INV-{20chars}`；(2) `hash_code(plain) -> String`：SHA-256 后 hex；(3) DAO：插入仅含 `code_hash`、`code_prefix`(明文前 8 位)、`created_by`、`expires_at`，**绝不存明文**
   - 验收标准：单元测试：100 次生成无重复；hash 长度 64；查询时按 hash 命中
 
--- [14] [ ] **邀请码管理 API（管理员）**
+-- [14] [x] **邀请码管理 API（管理员）**
   - AI 指令：实现端点（要求管理员中间件鉴权，role='admin'）：
     - `POST /api/invitations/generate` { count, notes?, expires_in_days? } → 返回 `{ invitations: [{id, code, code_prefix, expires_at}], download_url }`，明文 code 仅本次响应返回
     - `GET /api/invitations` 支持 `?status&page&limit`，返回 masked 视图（`INV-AbCd****`），**绝不返回 code_hash**
@@ -76,11 +76,11 @@
     - `DELETE /api/invitations/:id` 按 UUID 撤销，标记 status='revoked'
   - 验收标准：非管理员调用全部返回 403；列表接口响应中无 `code_hash` 字段
 
--- [15] [ ] **邀请码 CSV 一次性下载链接**
+-- [15] [x] **邀请码 CSV 一次性下载链接**
   - AI 指令：在生成端点中，将刚生成的明文邀请码列表写入 Redis 临时键（TTL 10 分钟），返回带签名 token 的 `download_url`；实现 `GET /api/invitations/download/:token` 一次性返回 CSV 后立即删除 Redis 键
   - 验收标准：同一 token 第二次访问返回 410 Gone
 
--- [16] [ ] **邀请码公开验证端点**
+-- [16] [x] **邀请码公开验证端点**
   - AI 指令：实现 `POST /api/invitations/validate` 接收明文 code（请求体，禁止走 URL），返回 `{ valid, expires_at?, used_by? }`；不返回任何敏感信息；带速率限制（每 IP 30/分钟）
   - 验收标准：无效 code 返回 `{ valid: false }` 不暴露存在性
 
@@ -267,4 +267,4 @@
 ---
 
 *最后更新：2026-05-07（WebSocket 实现迁移到 actix-ws）*
-*下一个待处理任务：[14] 邀请码管理 API（管理员）*
+*下一个待处理任务：[17] 注册端点*

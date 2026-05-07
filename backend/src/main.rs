@@ -80,6 +80,7 @@ async fn main() -> anyhow::Result<()> {
     // against the same config so token-bucket state is shared.
     let global_gov = middleware::global_governor_config();
     let auth_gov = middleware::auth_governor_config();
+    let validate_gov = middleware::invitation_validate_governor_config();
 
     log::info!("ichatpp backend listening on {bind_addr}");
 
@@ -105,6 +106,22 @@ async fn main() -> anyhow::Result<()> {
                 web::scope("/api/auth")
                     .wrap(Governor::new(&auth_gov))
                     .service(login_placeholder),
+            )
+            .service(
+                web::scope("/api/invitations")
+                    // /validate first so its tighter per-IP limit applies
+                    // only to the public endpoint, and so future `/{id}`
+                    // patterns in `routes()` can't shadow it. It's also
+                    // public — the AdminUser extractor isn't on the
+                    // handler — and exempt from CSRF (see `is_exempt_path`).
+                    .service(
+                        web::resource("/validate")
+                            .wrap(Governor::new(&validate_gov))
+                            .route(
+                                web::post().to(handlers::invitations::validate_handler),
+                            ),
+                    )
+                    .configure(handlers::invitations::routes),
             )
     })
     .bind(&bind_addr)?

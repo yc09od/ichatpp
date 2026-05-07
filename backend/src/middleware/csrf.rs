@@ -13,10 +13,9 @@
 //!
 //! ## Bypass list
 //!
-//! Login and register are pre-authentication entry points: no cookie exists
-//! yet. They are guarded by the rate limiter, password / invitation-code
-//! checks instead. As more public endpoints land (e.g. invitation validate
-//! in TODO [16]) extend [`is_exempt_path`] there.
+//! Login, register, and the public invitation-validate endpoint are
+//! pre-authentication entry points: no cookie exists yet. They are guarded
+//! by the rate limiter and password / invitation-code checks instead.
 //!
 //! ## Why constant-time compare?
 //!
@@ -87,7 +86,10 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 fn is_exempt_path(path: &str) -> bool {
-    matches!(path, "/api/auth/login" | "/api/auth/register")
+    matches!(
+        path,
+        "/api/auth/login" | "/api/auth/register" | "/api/invitations/validate"
+    )
 }
 
 fn is_mutation(method: &Method) -> bool {
@@ -347,6 +349,25 @@ mod tests {
         .await;
 
         let req = TestRequest::post().uri("/api/auth/register").to_request();
+        let resp = call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+    }
+
+    /// Public invitation-validate (TODO [16]) is called pre-registration,
+    /// before any cookie exists, so it must bypass CSRF in the same way
+    /// login/register do.
+    #[actix_web::test]
+    async fn invitation_validate_endpoint_bypasses_csrf() {
+        let app = init_service(
+            App::new()
+                .wrap(CsrfProtection)
+                .route("/api/invitations/validate", web::post().to(ok_handler)),
+        )
+        .await;
+
+        let req = TestRequest::post()
+            .uri("/api/invitations/validate")
+            .to_request();
         let resp = call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 200);
     }

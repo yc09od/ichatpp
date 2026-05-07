@@ -38,6 +38,12 @@ pub enum AppError {
     #[error("{0}")]
     Conflict(String),
 
+    /// Resource existed but is now permanently unavailable — used by the
+    /// one-shot CSV download (TODO [15]) where a Redis key is consumed
+    /// on first read and any subsequent attempt is `410 Gone`.
+    #[error("{0}")]
+    Gone(String),
+
     /// Anything unexpected. The underlying `anyhow::Error` is logged at
     /// ERROR level; callers see only a generic message to avoid leaking
     /// internal details.
@@ -53,6 +59,7 @@ impl AppError {
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::Gone(_) => StatusCode::GONE,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -64,6 +71,7 @@ impl AppError {
             Self::Forbidden(_) => "FORBIDDEN",
             Self::BadRequest(_) => "BAD_REQUEST",
             Self::Conflict(_) => "CONFLICT",
+            Self::Gone(_) => "GONE",
             Self::Internal(_) => "INTERNAL",
         }
     }
@@ -164,6 +172,10 @@ mod tests {
         assert_eq!(
             AppError::Conflict("x".into()).status_code(),
             StatusCode::CONFLICT
+        );
+        assert_eq!(
+            AppError::Gone("x".into()).status_code(),
+            StatusCode::GONE
         );
         assert_eq!(
             AppError::Internal(anyhow::anyhow!("x")).status_code(),
