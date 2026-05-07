@@ -48,11 +48,11 @@
   - AI 指令：在 `backend/migrations/` 下用 sqlx-cli 创建迁移文件，**严格按 ARCHITECTURE.md 第 5 节的 SQL** 顺序创建 users、user_roles、friends、friend_requests、messages、emojis、message_emojis、invitations 表及所有索引（包含 `uq_friend_requests_pending` 部分唯一索引）
   - 验收标准：`sqlx migrate run` 全部通过，`\d` 检查表结构匹配
 
--- [10] [ ] **CORS、限流与日志中间件**
+-- [10] [x] **CORS、限流与日志中间件**
   - AI 指令：实现：(1) CORS 中间件，`Access-Control-Allow-Credentials: true`，origin 从配置读取，禁止 `*`；(2) 基于 IP 的全局限流（actix-governor 或自实现令牌桶）；(3) 请求日志中间件输出 method/path/status/耗时
   - 验收标准：跨域请求带 cookie 能正确通过；连续 11 次 POST `/api/auth/login` 第 11 次返回 429
 
--- [11] [ ] **CSRF 中间件（双提交 cookie）**
+-- [11] [x] **CSRF 中间件（双提交 cookie）**
   - AI 指令：实现 CSRF 中间件：对所有 mutation（POST/PUT/DELETE/PATCH，除 `/api/auth/login` 与 `/api/auth/register`）校验 `X-CSRF-Token` 头与 `csrf_token` cookie 是否一致；登录成功时下发 csrf_token cookie（非 httpOnly, Secure, SameSite=Lax）
   - 验收标准：登录后调用受保护 mutation 不带 X-CSRF-Token 返回 403；带正确 token 通过
 
@@ -60,11 +60,11 @@
 
 ## 阶段 2：认证与邀请码系统
 
--- [12] [ ] **JWT 工具与 cookie 写入辅助**
+-- [12] [x] **JWT 工具与 cookie 写入辅助**
   - AI 指令：实现 `backend/src/auth/jwt.rs`，提供 `sign_access_token(user_id, role)` / `sign_refresh_token(user_id)` / `verify_token(token)`；使用 RS256 非对称加密；提供 `set_auth_cookies(response, access, refresh, csrf)` 辅助函数，按 ARCHITECTURE.md 第 4.1 节定义设置 httpOnly + Secure + SameSite=Lax，refresh 限定 Path=/api/auth/refresh
   - 验收标准：单元测试覆盖签发与验证（包含过期、错误签名场景）
 
--- [13] [ ] **邀请码生成与验证模块**
+-- [13] [x] **邀请码生成与验证模块**
   - AI 指令：在 `backend/src/handlers/invitations.rs` 实现：(1) 邀请码生成器：使用 `rand::rngs::OsRng` 产生 20 位字符（base62 字符集），格式 `INV-{20chars}`；(2) `hash_code(plain) -> String`：SHA-256 后 hex；(3) DAO：插入仅含 `code_hash`、`code_prefix`(明文前 8 位)、`created_by`、`expires_at`，**绝不存明文**
   - 验收标准：单元测试：100 次生成无重复；hash 长度 64；查询时按 hash 命中
 
@@ -267,4 +267,4 @@
 ---
 
 *最后更新：2026-05-07（WebSocket 实现迁移到 actix-ws）*
-*下一个待处理任务：[10] CORS、限流与日志中间件*
+*下一个待处理任务：[14] 邀请码管理 API（管理员）*

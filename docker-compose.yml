@@ -5,16 +5,20 @@ services:
     image: postgres:14
     container_name: ichatpp-postgres
     restart: unless-stopped
+    # Defaults match the credentials baked into DATABASE_URL in .env
+    # (vuugo:vuugo_dev@localhost:5432/ichatpp). Override with env vars to
+    # diverge — but keep them aligned with DATABASE_URL or the backend
+    # will hit auth failures.
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-ichatpp}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ichatpp_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-vuugo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vuugo_dev}
       POSTGRES_DB: ${POSTGRES_DB:-ichatpp}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ichatpp} -d ${POSTGRES_DB:-ichatpp}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vuugo} -d ${POSTGRES_DB:-ichatpp}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -23,13 +27,21 @@ services:
     image: redis:6-alpine
     container_name: ichatpp-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    # `--requirepass` matches REDIS_URL=redis://:redis_dev@... in .env.
+    # Without it the backend's auth attempt would fail with NOAUTH.
+    command:
+      [
+        "redis-server",
+        "--appendonly", "yes",
+        "--requirepass", "${REDIS_PASSWORD:-redis_dev}",
+      ]
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # `-a` authenticates; without it `ping` returns NOAUTH and reports unhealthy.
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_dev}", "--no-auth-warning", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
