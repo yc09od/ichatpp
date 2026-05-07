@@ -20,7 +20,7 @@
   - AI 指令：在 `backend/` 下 `cargo init`，写入 `Cargo.toml`，按 ARCHITECTURE.md 第 2 节"后端"表格列出的依赖加入：actix-web 4.x, actix-ws 0.3.x, tokio 1.x, serde, serde_json, sqlx (postgres, runtime-tokio-rustls, uuid, chrono, macros), redis, jsonwebtoken, bcrypt, uuid (v4), env_logger, dotenvy, sha2, rand
   - 验收标准：`cargo build` 通过，`cargo clippy` 无 error
 
--- [4] [ ] **前端 Next.js 工程初始化**
+-- [4] [x] **前端 Next.js 工程初始化**
   - AI 指令：在 `frontend/` 下用 `create-next-app@14` 生成项目（TypeScript + App Router + Tailwind + ESLint，不要 src/ 目录），追加依赖：@tanstack/react-query 5.x, zod；不要安装 socket.io-client、不要安装 next-auth
   - 验收标准：`npm run dev` 启动并访问 http://localhost:3000 显示默认页面，`npm run build` 通过
 
@@ -267,4 +267,4 @@
 ---
 
 *最后更新：2026-05-07（WebSocket 实现迁移到 actix-ws）*
-*下一个待处理任务：[4] 前端 Next.js 工程初始化*
+*下一个待处理任务：[5] 前端目录结构与全局 Provider*
