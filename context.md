@@ -5,7 +5,7 @@
 
 ## 项目快速摘要
 
-**ichatpp** 是一个开源的 Web 实时通讯应用，类似微信。**核心特性：** 用户必须使用邀请码注册（仅管理员可生成），登录使用 email + password，已注册用户可通过账号码（10 位数字）添加好友、进行实时文字聊天、自动保存消息记录、上传自定义表情。前端采用 **Next.js（App Router）+ TypeScript + Tailwind CSS + TanStack Query + 浏览器原生 WebSocket**（不使用 Socket.io，不使用 Next Auth），后端采用 **Rust + Actix-web + actix-web-actors（WebSocket）+ SQLx + JWT**。数据存储使用 **PostgreSQL**、缓存使用 **Redis**、对象存储使用 **MinIO/S3**。项目目前处于 MVP 开发阶段。
+**ichatpp** 是一个开源的 Web 实时通讯应用，类似微信。**核心特性：** 用户必须使用邀请码注册（仅管理员可生成），登录使用 email + password，已注册用户可通过账号码（10 位数字）添加好友、进行实时文字聊天、自动保存消息记录、上传自定义表情。前端采用 **Next.js（App Router）+ TypeScript + Tailwind CSS + TanStack Query + 浏览器原生 WebSocket**（不使用 Socket.io，不使用 Next Auth），后端采用 **Rust + Actix-web + actix-ws（WebSocket，Session + MessageStream，不使用 actor 模型）+ SQLx + JWT**。数据存储使用 **PostgreSQL**、缓存使用 **Redis**、对象存储使用 **MinIO/S3**。项目目前处于 MVP 开发阶段。
 
 ## 技术约束
 
@@ -16,7 +16,7 @@
 - **前端认证**：JWT 由后端 `Set-Cookie` 写入 **httpOnly + Secure + SameSite=Lax** cookie，前端 JS **不接触 token**；fetch 必须 `credentials:'include'`，mutation 请求附带 `X-CSRF-Token` 头（取自非 httpOnly 的 csrf_token cookie）；**不使用 Next Auth**
 - **后端语言**：Rust
 - **后端框架**：Actix-web 4.x
-- **后端 WebSocket**：actix-web-actors（不使用 tokio-tungstenite）
+- **后端 WebSocket**：actix-ws 0.3.x（Session + MessageStream + tokio task 模型；**不使用 actor 模型，不使用 tokio-tungstenite，不使用已废弃的 actix-web-actors**）
 - **代码风格**：
   - 前端：遵循 Next.js 和 React 最佳实践，组件使用函数式 + Hooks
   - 后端：遵循 Rust 标准库指南，使用 cargo clippy 检查
@@ -167,5 +167,5 @@
 
 ---
 
-*最后更新：2026-05-07（同步 scaffold-project-update：基于全部 md 文件生成 TODO.md，55 条任务覆盖阶段 0–7）*
+*最后更新：2026-05-07（同步 scaffold-project-update：WebSocket 实现从 actix-web-actors 迁移到 actix-ws；前次更新基于全部 md 文件生成 TODO.md，55 条任务覆盖阶段 0–7）*
 *维护者：ichatpp 开发团队*

@@ -16,8 +16,8 @@
   - AI 指令：在仓库根目录创建 `docker-compose.yml`，包含 services：`postgres:14`、`redis:6`、`minio/minio:latest`，分别暴露 5432/6379/9000+9001 端口；卷挂载持久化数据；`.env.example` 提供默认变量
   - 验收标准：`docker compose up -d` 能在本机起来，`docker compose ps` 三个服务状态为 healthy/running
 
--- [3] [ ] **后端 Cargo 工程初始化**
-  - AI 指令：在 `backend/` 下 `cargo init`，写入 `Cargo.toml`，按 ARCHITECTURE.md 第 2 节"后端"表格列出的依赖加入：actix-web 4.x, actix-web-actors 4.x, tokio 1.x, serde, serde_json, sqlx (postgres, runtime-tokio-rustls, uuid, chrono, macros), redis, jsonwebtoken, bcrypt, uuid (v4), env_logger, dotenvy, sha2, rand
+-- [3] [x] **后端 Cargo 工程初始化**
+  - AI 指令：在 `backend/` 下 `cargo init`，写入 `Cargo.toml`，按 ARCHITECTURE.md 第 2 节"后端"表格列出的依赖加入：actix-web 4.x, actix-ws 0.3.x, tokio 1.x, serde, serde_json, sqlx (postgres, runtime-tokio-rustls, uuid, chrono, macros), redis, jsonwebtoken, bcrypt, uuid (v4), env_logger, dotenvy, sha2, rand
   - 验收标准：`cargo build` 通过，`cargo clippy` 无 error
 
 -- [4] [ ] **前端 Next.js 工程初始化**
@@ -133,11 +133,11 @@
 ## 阶段 4：实时通讯（WebSocket）
 
 -- [26] [ ] **WebSocket 握手与鉴权**
-  - AI 指令：实现 `GET /api/ws` 升级到 WebSocket（actix-web-actors）；握手时从 cookie 读取 `access_token`，验证 JWT；建立 actor 后将用户加入 Redis Set `online_users`，启动定时器维持心跳
+  - AI 指令：实现 `GET /api/ws` 升级到 WebSocket（用 `actix_ws::handle(&req, body)` 拿到 `(HttpResponse, Session, MessageStream)`）；握手时从 cookie 读取 `access_token`，验证 JWT；升级成功后启动一个 tokio task 处理入站流，将用户加入 Redis Set `online_users`，并在 task 内维持心跳定时器
   - 验收标准：未登录连接返回 401；登录后连接成功，Redis 中可见 user_id
 
 -- [27] [ ] **在线状态广播**
-  - AI 指令：用户上线/下线时，查询其好友列表，向每个在线好友的 actor 推送 `user_online` / `user_offline` 事件；使用 Redis Pub/Sub 支持多实例广播
+  - AI 指令：用户上线/下线时，查询其好友列表，通过进程内 Session 注册表（`DashMap<UserId, Vec<Sender>>`，每个 Session task 启动时插入 mpsc Sender、退出时移除）向每个在线好友的 Session 推送 `user_online` / `user_offline` 事件；跨实例使用 Redis Pub/Sub 中转
   - 验收标准：A 上线时 A 的所有在线好友都能收到 user_online 事件
 
 -- [28] [ ] **消息收发与持久化**
@@ -150,7 +150,7 @@
 
 -- [30] [ ] **WebSocket 错误处理与心跳**
   - AI 指令：实现心跳（30s ping/pong），15s 内未响应断开连接；定义 ARCHITECTURE.md 第 4.7 节的 `error` 事件结构，所有失败场景统一通过 error 事件返回
-  - 验收标准：客户端断网 30s 后服务端自动清理 actor 与 Redis online 集合
+  - 验收标准：客户端断网 30s 后服务端自动结束对应的 Session task，并从 Session 注册表与 Redis online 集合中清理
 
 ---
 
@@ -266,5 +266,5 @@
 
 ---
 
-*最后更新：2026-05-07*
-*下一个待处理任务：[3] 后端 Cargo 工程初始化*
+*最后更新：2026-05-07（WebSocket 实现迁移到 actix-ws）*
+*下一个待处理任务：[4] 前端 Next.js 工程初始化*

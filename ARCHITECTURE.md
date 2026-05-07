@@ -66,7 +66,7 @@ ichatpp 采用**分离的前后端架构**，前端使用 Next.js 提供现代�
 | Jsonwebtoken | latest | JWT 认证 |
 | Bcrypt | latest | 密码加密 |
 | Uuid | latest | UUID 生成 |
-| actix-web-actors | 4.x | WebSocket 支持（基于 actor 模型，Actix 官方组件） |
+| actix-ws | 0.3.x | WebSocket 支持（轻量 Session + MessageStream，actix 团队当前推荐；不依赖 actor 模型） |
 | Env_logger | latest | 日志框架 |
 
 ### 数据库
@@ -380,6 +380,8 @@ GET    /api/invitations/validate        # 验证邀请码（任何人可调用�
 
 **职责：** 实时消息传输、在线状态管理
 
+**实现方式：** 使用 `actix-ws` —— 在 actix-web handler 中调用 `actix_ws::handle(&req, body)` 升级，得到 `(HttpResponse, Session, MessageStream)`，启动一个 tokio task 处理入站消息流；连接状态用普通 struct 管理，配合 Redis 与 mpsc 通道实现跨连接广播。**不使用 actor 模型**（旧的 `actix-web-actors` 已被官方废弃）。
+
 **连接生命周期：**
 1. 客户端发起 WebSocket 升级时，浏览器自动携带 `access_token` cookie；后端在握手阶段验证 JWT
 2. 服务器添加用户到在线集合（Redis Set）
@@ -681,4 +683,4 @@ S3/MinIO
 
 ---
 
-*最后更新：2026-05-07（同步 scaffold-project-update：邀请码哈希存储、项目改名 ichatpp、token 改 httpOnly cookies）*
+*最后更新：2026-05-07（同步 scaffold-project-update：邀请码哈希存储、项目改名 ichatpp、token 改 httpOnly cookies；WebSocket 实现从 actix-web-actors 迁移到 actix-ws）*
