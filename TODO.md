@@ -24,11 +24,11 @@
   - AI 指令：在 `frontend/` 下用 `create-next-app@14` 生成项目（TypeScript + App Router + Tailwind + ESLint，不要 src/ 目录），追加依赖：@tanstack/react-query 5.x, zod；不要安装 socket.io-client、不要安装 next-auth
   - 验收标准：`npm run dev` 启动并访问 http://localhost:3000 显示默认页面，`npm run build` 通过
 
--- [5] [ ] **前端目录结构与全局 Provider**
+-- [5] [x] **前端目录结构与全局 Provider**
   - AI 指令：按 ARCHITECTURE.md 第 3 节创建 `app/(auth)/`、`app/(app)/`、`components/`、`lib/`、`styles/` 目录；在 `app/layout.tsx` 中包裹 TanStack Query 的 `QueryClientProvider`；创建 `lib/api.ts` 封装基础 fetch（必须 `credentials: 'include'`，自动带 `X-CSRF-Token` 头）和 `lib/websocket.ts` 占位
   - 验收标准：根布局加载 QueryProvider 不报错；`lib/api.ts` 默认携带 cookie 和 CSRF 头
 
--- [6] [ ] **GitHub Actions CI 工作流**
+-- [6] [x] **GitHub Actions CI 工作流**
   - AI 指令：编写 `.github/workflows/frontend-ci.yml`（lint + typecheck + build + test）和 `.github/workflows/backend-ci.yml`（fmt + clippy + test），触发条件：push 到任何分支 + PR 到 main
   - 验收标准：本地 `act` 模拟通过，或推送到 GitHub 后 workflow 跑通
 
@@ -36,11 +36,11 @@
 
 ## 阶段 1：后端基础设施
 
--- [7] [ ] **配置管理与启动入口**
+-- [7] [x] **配置管理与启动入口**
   - AI 指令：实现 `backend/src/config.rs`，从环境变量加载：`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`(RS256 公私钥路径), `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `BIND_ADDR`；`main.rs` 初始化 logger、连接池（PgPool、Redis）、启动 Actix HttpServer 监听 0.0.0.0:8080
   - 验收标准：`cargo run` 后访问 `GET /api/health` 返回 `{"status":"ok"}`
 
--- [8] [ ] **错误体系与统一响应封装**
+-- [8] [x] **错误体系与统一响应封装**
   - AI 指令：在 `backend/src/errors/` 实现 `AppError` 枚举（含 NotFound、Unauthorized、Forbidden、BadRequest、Conflict、Internal），实现 `ResponseError`，错误体使用 ARCHITECTURE.md 第 6 节定义的 JSON 结构；提供成功响应的辅助 `ApiResponse<T>` 包装为 `{ data, meta: { timestamp } }`
   - 验收标准：手写一个返回 NotFound 的端点，响应符合错误格式
 
@@ -267,4 +267,4 @@
 ---
 
 *最后更新：2026-05-07（WebSocket 实现迁移到 actix-ws）*
-*下一个待处理任务：[5] 前端目录结构与全局 Provider*
+*下一个待处理任务：[9] 数据库迁移：建表脚本*
