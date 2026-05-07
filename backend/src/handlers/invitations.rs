@@ -197,11 +197,13 @@ pub async fn count_invitation_stats(pool: &PgPool) -> Result<StatsCounts, sqlx::
 }
 
 /// Minimal projection used by lookup-by-hash. Deliberately omits
-/// `code_hash` and any admin-only fields — the public validate handler
-/// (TODO [16]) must not be able to leak them through accidental
-/// re-serialization.
+/// `code_hash` — the public validate handler (TODO [16]) must not be
+/// able to leak it through accidental re-serialization. `id` is
+/// exposed so the register handler (TODO [17]) can run the
+/// `UPDATE invitations SET status='used' WHERE id=$1` follow-up.
 #[derive(Debug, sqlx::FromRow)]
 pub struct InvitationStatusRow {
+    pub id: Uuid,
     pub status: String,
     pub expires_at: NaiveDateTime,
     pub used_by: Option<Uuid>,
@@ -219,7 +221,7 @@ pub async fn find_invitation_by_hash(
 ) -> Result<Option<InvitationStatusRow>, sqlx::Error> {
     sqlx::query_as::<_, InvitationStatusRow>(
         r#"
-        SELECT status, expires_at, used_by
+        SELECT id, status, expires_at, used_by
         FROM invitations
         WHERE code_hash = $1
         "#,

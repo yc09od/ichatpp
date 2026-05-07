@@ -4,7 +4,9 @@
 //! consume this module via `crate::auth::{jwt, set_auth_cookies}`.
 
 pub mod admin;
+pub mod authenticated;
 pub mod jwt;
+pub mod refresh_store;
 
 pub mod cookies;
 // Consumed by the auth handlers landing in TODOs [17]/[18]/[19]; re-export

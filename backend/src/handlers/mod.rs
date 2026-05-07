@@ -4,4 +4,6 @@
 //! calls for one slice of the API. Cross-cutting concerns (auth, CSRF,
 //! rate limiting) live in `crate::middleware`.
 
+pub mod auth;
 pub mod invitations;
+pub mod users;

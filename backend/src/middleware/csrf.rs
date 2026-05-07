@@ -17,6 +17,13 @@
 //! pre-authentication entry points: no cookie exists yet. They are guarded
 //! by the rate limiter and password / invitation-code checks instead.
 //!
+//! Refresh and logout (TODO [19]) are also exempt: refresh runs precisely
+//! when the access token (and the same-TTL csrf token) has just expired,
+//! so requiring a live csrf cookie would deadlock the SPA's refresh-and-
+//! retry loop. Both endpoints are gated by the access/refresh JWT plus
+//! the Redis whitelist, which is stronger evidence of intent than a
+//! double-submit token.
+//!
 //! ## Why constant-time compare?
 //!
 //! Tokens are random and equal-length, so a naive `==` would in theory leak
@@ -88,7 +95,11 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 fn is_exempt_path(path: &str) -> bool {
     matches!(
         path,
-        "/api/auth/login" | "/api/auth/register" | "/api/invitations/validate"
+        "/api/auth/login"
+            | "/api/auth/register"
+            | "/api/auth/refresh"
+            | "/api/auth/logout"
+            | "/api/invitations/validate"
     )
 }
 
@@ -349,6 +360,42 @@ mod tests {
         .await;
 
         let req = TestRequest::post().uri("/api/auth/register").to_request();
+        let resp = call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+    }
+
+    /// Refresh (TODO [19]) bypasses CSRF — the SPA may invoke it precisely
+    /// when its csrf cookie has expired alongside the access cookie. JWT
+    /// + Redis whitelist provide the actual access control.
+    #[actix_web::test]
+    async fn refresh_endpoint_bypasses_csrf() {
+        let app = init_service(
+            App::new()
+                .wrap(CsrfProtection)
+                .route("/api/auth/refresh", web::post().to(ok_handler)),
+        )
+        .await;
+
+        let req = TestRequest::post().uri("/api/auth/refresh").to_request();
+        let resp = call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+    }
+
+    /// Logout (TODO [19]) bypasses CSRF for the same reason refresh does:
+    /// the worst-case CSRF on logout is a forced session end, which is
+    /// only an annoyance and not a privilege escalation, while requiring
+    /// CSRF would block legitimate logouts whenever the csrf cookie has
+    /// expired.
+    #[actix_web::test]
+    async fn logout_endpoint_bypasses_csrf() {
+        let app = init_service(
+            App::new()
+                .wrap(CsrfProtection)
+                .route("/api/auth/logout", web::post().to(ok_handler)),
+        )
+        .await;
+
+        let req = TestRequest::post().uri("/api/auth/logout").to_request();
         let resp = call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 200);
     }

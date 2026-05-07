@@ -4,16 +4,18 @@ mod errors;
 mod handlers;
 mod middleware;
 mod responses;
+mod services;
 
 use std::sync::Arc;
 
 use actix_governor::Governor;
-use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 
 use crate::auth::jwt::Keys;
 use crate::config::Config;
+use crate::services::storage::ObjectStore;
 
 /// Application state shared across all handlers.
 ///
@@ -29,23 +31,12 @@ pub struct AppState {
     pub redis: redis::Client,
     pub config: Arc<Config>,
     pub jwt_keys: Keys,
+    pub storage: ObjectStore,
 }
 
 #[get("/api/health")]
 async fn health() -> impl Responder {
     HttpResponse::Ok().json(json!({"status": "ok"}))
-}
-
-/// Placeholder for `POST /api/auth/login` — replaced in TODO [18].
-/// Exists now so that TODO [10]'s rate-limit verification has a route to hit.
-#[post("/login")]
-async fn login_placeholder() -> impl Responder {
-    HttpResponse::NotImplemented().json(json!({
-        "error": {
-            "code": "NOT_IMPLEMENTED",
-            "message": "login endpoint pending — see TODO [18]"
-        }
-    }))
 }
 
 #[actix_web::main]
@@ -69,11 +60,17 @@ async fn main() -> anyhow::Result<()> {
     // can't issue or verify any JWT, so refusing to boot is correct.
     let jwt_keys = Keys::from_config(&cfg)?;
 
+    // Same posture for object storage credentials: parse at boot so a
+    // misconfigured access key / secret fails the server start, not the
+    // first upload.
+    let storage = ObjectStore::from_config(&cfg)?;
+
     let state = AppState {
         db,
         redis,
         config: Arc::new(cfg),
         jwt_keys,
+        storage,
     };
 
     // Governor configs are constructed once; each worker calls `Governor::new`
@@ -105,7 +102,19 @@ async fn main() -> anyhow::Result<()> {
             .service(
                 web::scope("/api/auth")
                     .wrap(Governor::new(&auth_gov))
-                    .service(login_placeholder),
+                    .route("/login", web::post().to(handlers::auth::login_handler))
+                    .route(
+                        "/register",
+                        web::post().to(handlers::auth::register_handler),
+                    )
+                    .route(
+                        "/refresh",
+                        web::post().to(handlers::auth::refresh_handler),
+                    )
+                    .route("/logout", web::post().to(handlers::auth::logout_handler)),
+            )
+            .service(
+                web::scope("/api/users").configure(handlers::users::routes),
             )
             .service(
                 web::scope("/api/invitations")

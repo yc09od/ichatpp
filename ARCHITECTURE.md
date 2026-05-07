@@ -67,6 +67,9 @@ ichatpp 采用**分离的前后端架构**，前端使用 Next.js 提供现代�
 | Bcrypt | latest | 密码加密 |
 | Uuid | latest | UUID 生成 |
 | actix-ws | 0.3.x | WebSocket 支持（轻量 Session + MessageStream，actix 团队当前推荐；不依赖 actor 模型） |
+| actix-multipart | 0.7.x | 头像 / 表情上传的 multipart/form-data 解析（TODO [22] / [35]） |
+| rust-s3 | 0.34.x | MinIO / S3 客户端（path-style 寻址；选用其而非 aws-sdk-s3 是为了控制依赖数量与冷构建时间） |
+| image | 0.25.x | 头像 / 表情解码与缩略图生成（features 仅启用 `png` + `jpeg`，禁用其余编解码器以契合白名单格式） |
 | Env_logger | latest | 日志框架 |
 
 ### 数据库

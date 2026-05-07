@@ -1,18 +1,17 @@
-//! `AdminUser` extractor — gates the admin-only endpoints.
+//! `AuthenticatedUser` extractor — gates every endpoint that needs *any*
+//! logged-in user (no role check).
 //!
-//! Per ARCHITECTURE.md §4.6, the role is embedded in the access token's
-//! claims, so admin checks don't need a per-request DB roundtrip. The
-//! tradeoff: demoting a user only takes effect once their access token
-//! expires (or is revoked via the refresh-token blocklist landing in
-//! TODO [19]).
+//! Companion to [`crate::auth::admin::AdminUser`]: same mechanism (read
+//! the access cookie, verify JWT signature/expiry/type), the only
+//! difference is that this extractor accepts whatever `role` claim the
+//! token carries instead of demanding `admin`.
 //!
-//! Failures are split between two status codes:
-//! - missing / invalid / wrong-type token → **401 Unauthorized**
-//! - valid access token but role ≠ "admin" → **403 Forbidden**
-//!
-//! TODO [14]'s acceptance criterion ("非管理员调用全部返回 403") covers the
-//! authenticated-but-wrong-role case; missing-credential still uses 401
-//! because that's what callers act on (re-auth vs. give up).
+//! 401 (vs. 403) policy: any failure here is "you couldn't authenticate"
+//! — there is no role-mismatch path. A handler that wants to require
+//! a specific role should use `AdminUser` (or, when more roles land,
+//! a similar role-checking extractor).
+
+#![allow(dead_code)] // first non-test consumer lands with TODO [21]
 
 use std::future::{ready, Ready};
 
@@ -24,16 +23,20 @@ use crate::auth::jwt::TokenType;
 use crate::errors::AppError;
 use crate::AppState;
 
-const ADMIN_ROLE: &str = "admin";
+/// Default role assumed when a (theoretically impossible) access token
+/// has no `role` claim. Mirrors the same "fall back to user" defense
+/// the login query uses for a missing `user_roles` row.
+const DEFAULT_ROLE: &str = "user";
 
-/// Marker type that handlers list as a parameter to require admin auth.
-/// `user_id` is exposed so handlers can record `created_by` etc.
-#[derive(Debug, Clone, Copy)]
-pub struct AdminUser {
+/// Marker type — handlers list it as a parameter to require auth, then
+/// read `user_id` / `role` from the extracted struct.
+#[derive(Debug, Clone)]
+pub struct AuthenticatedUser {
     pub user_id: Uuid,
+    pub role: String,
 }
 
-impl FromRequest for AdminUser {
+impl FromRequest for AuthenticatedUser {
     type Error = AppError;
     type Future = Ready<Result<Self, AppError>>;
 
@@ -42,20 +45,18 @@ impl FromRequest for AdminUser {
     }
 }
 
-fn extract(req: &HttpRequest) -> Result<AdminUser, AppError> {
+fn extract(req: &HttpRequest) -> Result<AuthenticatedUser, AppError> {
     let cookie = req
         .cookie(ACCESS_COOKIE_NAME)
         .ok_or_else(|| AppError::Unauthorized("missing access_token cookie".into()))?;
 
     // Misconfiguration — the route was mounted without the AppState
     // `web::Data`. Surface as 500 (Internal) since clients can't fix it.
-    let state = req
-        .app_data::<web::Data<AppState>>()
-        .ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!(
-                "AdminUser extractor: AppState not registered on this scope"
-            ))
-        })?;
+    let state = req.app_data::<web::Data<AppState>>().ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "AuthenticatedUser extractor: AppState not registered on this scope"
+        ))
+    })?;
 
     // `verify_token(.., Access)` covers signature, expiry, AND token-type
     // confusion — a refresh token presented in the access cookie is
@@ -65,12 +66,9 @@ fn extract(req: &HttpRequest) -> Result<AdminUser, AppError> {
         .verify_token(cookie.value(), TokenType::Access)
         .map_err(|_| AppError::Unauthorized("invalid access token".into()))?;
 
-    if claims.role.as_deref() != Some(ADMIN_ROLE) {
-        return Err(AppError::Forbidden("admin role required".into()));
-    }
-
-    Ok(AdminUser {
+    Ok(AuthenticatedUser {
         user_id: claims.sub,
+        role: claims.role.unwrap_or_else(|| DEFAULT_ROLE.to_owned()),
     })
 }
 
@@ -112,106 +110,107 @@ mod tests {
         };
 
         AppState {
-            // `connect_lazy` doesn't open a connection until first use, so
-            // tests that never query work with an unreachable URL.
             db: sqlx::postgres::PgPoolOptions::new()
                 .connect_lazy(&cfg.database_url)
                 .expect("lazy pool"),
             redis: redis::Client::open(cfg.redis_url.clone()).expect("redis client"),
             jwt_keys: Keys::from_pem(PRIV_PEM, PUB_PEM, 3600, 604800).expect("test keys"),
-            // ObjectStore parses creds at construction; tests don't talk
-            // to S3 so the dummy values from `cfg` are sufficient.
             storage: crate::services::storage::ObjectStore::from_config(&cfg)
                 .expect("test object store"),
             config: Arc::new(cfg),
         }
     }
 
-    /// Stub handler — extractor runs first; this body only executes if
-    /// the extractor accepts the request.
-    #[get("/admin/echo")]
-    async fn admin_echo(admin: AdminUser) -> HttpResponse {
-        HttpResponse::Ok().body(admin.user_id.to_string())
+    /// Stub — extractor runs first; this body only executes if it accepts.
+    #[get("/me/echo")]
+    async fn echo(user: AuthenticatedUser) -> HttpResponse {
+        HttpResponse::Ok().body(format!("{}|{}", user.user_id, user.role))
     }
 
-    macro_rules! mount_admin_echo {
+    macro_rules! mount_echo {
         ($state:expr) => {
             init_service(
                 App::new()
                     .app_data(web::Data::new($state))
-                    .service(admin_echo),
+                    .service(echo),
             )
             .await
         };
     }
 
+    /// The acceptance criterion's first half ("未登录调用 /api/users/me
+    /// 返回 401") rides on this — no access cookie, no entry.
     #[actix_web::test]
     async fn missing_access_cookie_returns_401() {
-        let app = mount_admin_echo!(make_state());
-        let req = TestRequest::get().uri("/admin/echo").to_request();
+        let app = mount_echo!(make_state());
+        let req = TestRequest::get().uri("/me/echo").to_request();
         let resp = call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 401);
     }
 
     #[actix_web::test]
     async fn malformed_token_returns_401() {
-        let app = mount_admin_echo!(make_state());
+        let app = mount_echo!(make_state());
         let req = TestRequest::get()
-            .uri("/admin/echo")
+            .uri("/me/echo")
             .cookie(Cookie::new(ACCESS_COOKIE_NAME, "not-a-real-jwt"))
             .to_request();
         let resp = call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 401);
     }
 
+    /// Type-confusion guard — same as `AdminUser`. A valid refresh token
+    /// in the access cookie must not authenticate.
     #[actix_web::test]
     async fn refresh_token_in_access_cookie_returns_401() {
-        // Type-confusion guard: a valid refresh token must not be accepted
-        // here. `verify_token(.., Access)` rejects on `typ` mismatch.
         let state = make_state();
         let token = state.jwt_keys.sign_refresh_token(Uuid::new_v4()).unwrap();
-        let app = mount_admin_echo!(state);
+        let app = mount_echo!(state);
         let req = TestRequest::get()
-            .uri("/admin/echo")
+            .uri("/me/echo")
             .cookie(Cookie::new(ACCESS_COOKIE_NAME, token))
             .to_request();
         let resp = call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 401);
     }
 
+    /// Unlike `AdminUser`, a non-admin role passes through here. Pin
+    /// the contract: this extractor accepts *any* role.
     #[actix_web::test]
-    async fn user_role_returns_403() {
-        // The TODO [14] verification: a logged-in non-admin must get 403.
+    async fn user_role_passes_through() {
         let state = make_state();
-        let token = state
-            .jwt_keys
-            .sign_access_token(Uuid::new_v4(), "user")
-            .unwrap();
-        let app = mount_admin_echo!(state);
+        let user_id = Uuid::new_v4();
+        let token = state.jwt_keys.sign_access_token(user_id, "user").unwrap();
+        let app = mount_echo!(state);
         let req = TestRequest::get()
-            .uri("/admin/echo")
-            .cookie(Cookie::new(ACCESS_COOKIE_NAME, token))
-            .to_request();
-        let resp = call_service(&app, req).await;
-        assert_eq!(resp.status().as_u16(), 403);
-    }
-
-    #[actix_web::test]
-    async fn admin_role_passes_through() {
-        let state = make_state();
-        let admin_id = Uuid::new_v4();
-        let token = state
-            .jwt_keys
-            .sign_access_token(admin_id, "admin")
-            .unwrap();
-        let app = mount_admin_echo!(state);
-        let req = TestRequest::get()
-            .uri("/admin/echo")
+            .uri("/me/echo")
             .cookie(Cookie::new(ACCESS_COOKIE_NAME, token))
             .to_request();
         let resp = call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 200);
         let body = actix_web::test::read_body(resp).await;
-        assert_eq!(std::str::from_utf8(&body).unwrap(), admin_id.to_string());
+        assert_eq!(
+            std::str::from_utf8(&body).unwrap(),
+            format!("{user_id}|user")
+        );
+    }
+
+    #[actix_web::test]
+    async fn admin_role_also_passes_through() {
+        let state = make_state();
+        let user_id = Uuid::new_v4();
+        let token = state.jwt_keys.sign_access_token(user_id, "admin").unwrap();
+        let app = mount_echo!(state);
+        let req = TestRequest::get()
+            .uri("/me/echo")
+            .cookie(Cookie::new(ACCESS_COOKIE_NAME, token))
+            .to_request();
+        let resp = call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body = actix_web::test::read_body(resp).await;
+        assert_eq!(
+            std::str::from_utf8(&body).unwrap(),
+            format!("{user_id}|admin")
+        );
     }
 }

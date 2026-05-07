@@ -84,7 +84,7 @@
   - AI 指令：实现 `POST /api/invitations/validate` 接收明文 code（请求体，禁止走 URL），返回 `{ valid, expires_at?, used_by? }`；不返回任何敏感信息；带速率限制（每 IP 30/分钟）
   - 验收标准：无效 code 返回 `{ valid: false }` 不暴露存在性
 
--- [17] [ ] **注册端点**
+-- [17] [x] **注册端点**
   - AI 指令：`POST /api/auth/register` 接收 `{ email, password, invitation_code, nickname? }`：
     1. 验证 email 格式、密码强度（≥8 位）
     2. 计算 invitation_code 的 SHA-256，查 invitations 表 status='unused' 且未过期
@@ -92,15 +92,15 @@
     4. 签发 access_token + refresh_token + csrf_token cookies，响应体 **不返回任何 token**
   - 验收标准：成功 201，响应 Set-Cookie 包含 3 个 cookie；邀请码已用过返回 409
 
--- [18] [ ] **登录端点**
+-- [18] [x] **登录端点**
   - AI 指令：`POST /api/auth/login` 接收 `{ email, password }`：bcrypt 验证 → 写入三个 cookie；登录失败 5 次锁定该邮箱 15 分钟（Redis 计数）；速率限制 10/分钟/IP
   - 验收标准：错误密码不暴露 email 是否存在（统一返回 401 "邮箱或密码错误"）
 
--- [19] [ ] **刷新与登出端点**
+-- [19] [x] **刷新与登出端点**
   - AI 指令：`POST /api/auth/refresh` 读取 refresh_token cookie，验证 + 检查 Redis 白名单（支持服务端撤销），下发新 access_token + csrf_token；`POST /api/auth/logout` Set-Cookie 清空三个 cookie 且从 Redis 撤销 refresh_token
   - 验收标准：登出后 refresh 端点返回 401
 
--- [20] [ ] **管理员 seed 脚本**
+-- [20] [x] **管理员 seed 脚本**
   - AI 指令：实现 `backend/src/bin/seed_admin.rs`，CLI 接收 `--email --password`，创建 users 行 + user_roles(role='admin')；若已存在管理员则报错退出
   - 验收标准：`cargo run --bin seed_admin -- --email a@b.c --password XXX` 成功创建管理员，重复运行报错
 
@@ -108,15 +108,15 @@
 
 ## 阶段 3：用户与好友模块
 
--- [21] [ ] **用户档案 API**
+-- [21] [x] **用户档案 API**
   - AI 指令：实现 ARCHITECTURE.md 第 4.2 节列出的端点：`GET /api/users/me`、`PUT /api/users/me`（昵称、签名、可见性）、`GET /api/users/:user_id`（公开信息）、`GET /api/users/by-code/:code`（按账号码查找）；输入用 Zod 风格 schema 校验
   - 验收标准：未登录调用 `/api/users/me` 返回 401；可见性 false 的用户对非好友返回 404
 
--- [22] [ ] **头像上传与对象存储集成**
+-- [22] [x] **头像上传与对象存储集成**
   - AI 指令：实现 `POST /api/users/avatar`：接受 multipart/form-data（PNG/JPG ≤ 2MB），上传到 MinIO/S3 桶 `avatars/{user_id}/{uuid}.{ext}`，更新 users.avatar_url；同时生成 200x200 缩略图存到 `avatars/{user_id}/{uuid}_thumb.{ext}`
   - 验收标准：上传后 `users.avatar_url` 指向有效 URL，浏览器可访问
 
--- [23] [ ] **管理员用户管理 API**
+-- [23] [x] **管理员用户管理 API**
   - AI 指令：实现 `GET /api/users`（管理员，分页）和 `PUT /api/users/:user_id/role`（管理员，修改角色）
   - 验收标准：非管理员 403；管理员可将其他用户提升为 admin
 
@@ -267,4 +267,4 @@
 ---
 
 *最后更新：2026-05-07（WebSocket 实现迁移到 actix-ws）*
-*下一个待处理任务：[17] 注册端点*
+*下一个待处理任务：[24] 好友请求 API*
