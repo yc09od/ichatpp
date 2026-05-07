@@ -44,7 +44,7 @@
   - AI 指令：在 `backend/src/errors/` 实现 `AppError` 枚举（含 NotFound、Unauthorized、Forbidden、BadRequest、Conflict、Internal），实现 `ResponseError`，错误体使用 ARCHITECTURE.md 第 6 节定义的 JSON 结构；提供成功响应的辅助 `ApiResponse<T>` 包装为 `{ data, meta: { timestamp } }`
   - 验收标准：手写一个返回 NotFound 的端点，响应符合错误格式
 
--- [9] [ ] **数据库迁移：建表脚本**
+-- [9] [x] **数据库迁移：建表脚本**
   - AI 指令：在 `backend/migrations/` 下用 sqlx-cli 创建迁移文件，**严格按 ARCHITECTURE.md 第 5 节的 SQL** 顺序创建 users、user_roles、friends、friend_requests、messages、emojis、message_emojis、invitations 表及所有索引（包含 `uq_friend_requests_pending` 部分唯一索引）
   - 验收标准：`sqlx migrate run` 全部通过，`\d` 检查表结构匹配
 
@@ -267,4 +267,4 @@
 ---
 
 *最后更新：2026-05-07（WebSocket 实现迁移到 actix-ws）*
-*下一个待处理任务：[9] 数据库迁移：建表脚本*
+*下一个待处理任务：[10] CORS、限流与日志中间件*
