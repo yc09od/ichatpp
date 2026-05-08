@@ -24,7 +24,7 @@ ichatpp 是一个类似微信的网页通讯应用，专为朋友社交场景设
 - **后端**：Rust（Actix-web 框架）、PostgreSQL、Redis
 - **实时通讯**：WebSocket（前后端）
 - **存储**：PostgreSQL（数据）、MinIO/S3（图片存储）
-- **部署**：Docker、Docker Compose
+- **部署**：Docker 多阶段镜像、Docker Compose（开发）、Coolify 自托管 PaaS（生产首选）
 
 ## 快速开始
 

@@ -25,7 +25,10 @@ pub struct Meta {
 }
 
 impl<T: Serialize> ApiResponse<T> {
-    fn build(data: T) -> Self {
+    /// Build the envelope without rendering — callers that need to attach
+    /// `Set-Cookie` headers (e.g. the register/login handlers) get the
+    /// envelope from here and then `builder.json(...)` it themselves.
+    pub fn build(data: T) -> Self {
         Self {
             data,
             meta: Meta {

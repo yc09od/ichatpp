@@ -1,0 +1,23 @@
+# cargo-set defaults for the ichatpp backend.
+#
+# These match the docker-compose dev stack at the repo root. Plain-string
+# entries are *non-forced*: a value already present in the environment
+# (e.g. exported in your shell, or loaded by dotenvy at runtime) takes
+# precedence. The point is to ensure `cargo test` has working defaults
+# even when the developer didn't source .env first.
+
+[env]
+DATABASE_URL = "postgresql://vuugo:vuugo_dev@localhost:5432/ichatpp"
+REDIS_URL = "redis://:redis_dev@localhost:6379"
+S3_ENDPOINT = "http://localhost:9000"
+S3_ACCESS_KEY = "minioadmin"
+S3_SECRET_KEY = "minioadmin"
+S3_REGION = "us-east-1"
+S3_BUCKET_AVATARS = "avatars"
+S3_BUCKET_EMOJIS = "emojis"
+S3_BUCKET_EXPORTS = "exports"
+JWT_PRIVATE_KEY_PATH = "keys/jwt-private.pem"
+JWT_PUBLIC_KEY_PATH = "keys/jwt-public.pem"
+COOKIE_SECURE = "false"
+FRONTEND_ORIGIN = "http://localhost:3000"
+COOKIE_DOMAIN = "localhost"

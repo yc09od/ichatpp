@@ -7,6 +7,7 @@ authors = ["ichatpp contributors"]
 license = "MIT"
 description = "ichatpp backend — Rust + Actix-web realtime chat server"
 publish = false
+default-run = "ichatpp"
 
 [dependencies]
 # ── Web framework & async runtime ──
@@ -14,9 +15,19 @@ actix-web = "4.5"
 actix-ws = "0.3"
 actix-cors = "0.7"
 actix-governor = "0.8"  # IP-keyed rate limiting (TODO [10])
+actix-multipart = "0.7" # avatar / emoji uploads (TODO [22] / [35])
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 dashmap = "6"  # in-process Session registry for WebSocket fan-out (TODO [27])
+
+# ── Object storage & image processing (TODO [22] / [35]) ──
+# rust-s3 chosen over aws-sdk-s3 for compile-time / dep-count reasons; it
+# supports MinIO via Region::Custom + with-path-style. tokio-rustls-tls
+# avoids OpenSSL on Windows builds.
+rust-s3 = { version = "0.34", default-features = false, features = ["tokio-rustls-tls"] }
+# default-features off keeps the codec set tight: PNG + JPEG only, since
+# uploads are restricted to those two formats by the avatar handler.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # ── Serialization ──
 serde = { version = "1", features = ["derive"] }

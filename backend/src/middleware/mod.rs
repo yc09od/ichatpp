@@ -68,3 +68,16 @@ pub fn auth_governor_config() -> StandardGovernorConfig {
         .finish()
         .expect("auth governor: invalid configuration")
 }
+
+/// Per-IP rate limit for `POST /api/invitations/validate` (TODO [16]):
+/// 30 req/min/IP. Burst 30, refills 1 token / 2 s. Tighter than the
+/// global limit so an attacker can't trivially turn the validate
+/// endpoint into a code-guessing oracle, looser than the auth limit so
+/// the SPA's pre-submit check on the registration form is responsive.
+pub fn invitation_validate_governor_config() -> StandardGovernorConfig {
+    GovernorConfigBuilder::default()
+        .seconds_per_request(2)
+        .burst_size(30)
+        .finish()
+        .expect("validate governor: invalid configuration")
+}
