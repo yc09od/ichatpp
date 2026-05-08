@@ -537,6 +537,39 @@ fn key_from_url(url: &str, _bucket: &str, bucket_root: &str) -> Option<String> {
     url.strip_prefix(bucket_root).map(str::to_owned)
 }
 
+/// `GET /api/emojis/{id}`
+///
+/// Public-by-id lookup — any authenticated user can resolve any emoji's
+/// metadata. The image bytes are already anonymously downloadable from
+/// the emojis bucket (see docker-compose minio-init), so this endpoint
+/// doesn't widen the exposure; it just lets the SPA render emojis that
+/// belong to *other* users (e.g. a friend's emoji embedded in a message
+/// the requester received).
+///
+/// Returns the same [`EmojiView`] shape as the list endpoint — owner's
+/// `user_id` is *not* included, matching the test pin upstream.
+pub async fn get_by_id_handler(
+    _user: AuthenticatedUser,
+    path: web::Path<Uuid>,
+    state: web::Data<AppState>,
+) -> AppResult<HttpResponse> {
+    let id = path.into_inner();
+    let row: Option<EmojiRow> = sqlx::query_as(
+        r#"
+        SELECT id, name, file_url, thumbnail_url, mime_type, file_size, created_at
+        FROM emojis
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("get emoji by id: {e}")))?;
+
+    let row = row.ok_or_else(|| AppError::NotFound("emoji not found".into()))?;
+    Ok(HttpResponse::Ok().json(ApiResponse::build(EmojiView::from(row))))
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Route configuration
 // ────────────────────────────────────────────────────────────────────────
@@ -544,6 +577,7 @@ fn key_from_url(url: &str, _bucket: &str, bucket_root: &str) -> Option<String> {
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.route("", web::get().to(list_handler))
         .route("", web::post().to(upload_handler))
+        .route("/{id}", web::get().to(get_by_id_handler))
         .route("/{id}", web::delete().to(delete_handler));
 }
 

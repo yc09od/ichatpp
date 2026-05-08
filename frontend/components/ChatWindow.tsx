@@ -21,14 +21,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, apiFetch } from '@/lib/api';
 import {
   useSendWebSocket,
   useWebSocketEvent,
 } from '@/components/providers/WebSocketProvider';
 import { useSelfUser } from '@/components/TopBar';
-import { EmojiPicker, type EmojiView } from '@/components/EmojiPicker';
+import { EmojiPicker, type EmojiView, useEmojis } from '@/components/EmojiPicker';
 
 // ────────────────────────────────────────────────────────────────────────
 // Types
@@ -227,7 +227,45 @@ export function ChatWindow({ friendId }: ChatWindowProps) {
   // ── Composer ──
   const [draft, setDraft] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [stagedEmojis, setStagedEmojis] = useState<EmojiView[]>([]);
+
+  // Used to render images inline in MessageRow when a message carries
+  // `emoji_ids`. Two sources stitched together:
+  //   1. The user's own emoji catalog (single bulk fetch, already cached).
+  //   2. Per-id lookups for emojis owned by the *other* party. Each id
+  //      becomes its own TanStack query so identical ids across many
+  //      messages collapse to a single network hop and the result is
+  //      shared across rows.
+  const { data: myEmojis } = useEmojis();
+  const ownedEmojiIdSet = useMemo(
+    () => new Set((myEmojis ?? []).map((e) => e.id)),
+    [myEmojis],
+  );
+  const unknownEmojiIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of list) {
+      for (const id of m.emoji_ids) {
+        if (!ownedEmojiIdSet.has(id)) ids.add(id);
+      }
+    }
+    return Array.from(ids);
+  }, [list, ownedEmojiIdSet]);
+  const fetchedEmojis = useQueries({
+    queries: unknownEmojiIds.map((id) => ({
+      queryKey: ['emoji', id] as const,
+      queryFn: () => apiFetch<EmojiView>(`/api/emojis/${id}`),
+      // Emojis are mostly immutable once uploaded; a 10-minute window
+      // keeps the cache useful without chasing renames forever.
+      staleTime: 10 * 60 * 1000,
+    })),
+  });
+  const emojiById = useMemo(() => {
+    const m = new Map<string, EmojiView>();
+    for (const e of myEmojis ?? []) m.set(e.id, e);
+    for (const r of fetchedEmojis) {
+      if (r.data) m.set(r.data.id, r.data);
+    }
+    return m;
+  }, [myEmojis, fetchedEmojis]);
 
   const onSend = useCallback(() => {
     const trimmed = draft.trim();
@@ -239,7 +277,7 @@ export function ChatWindow({ friendId }: ChatWindowProps) {
       to_user_id: friendId,
       content: trimmed,
       is_deleted: false,
-      emoji_ids: stagedEmojis.map((e) => e.id),
+      emoji_ids: [],
       created_at: new Date().toISOString(),
       pending: true,
       clientId,
@@ -252,12 +290,45 @@ export function ChatWindow({ friendId }: ChatWindowProps) {
       type: 'message',
       to_user_id: friendId,
       content: trimmed,
-      emoji_ids: stagedEmojis.map((e) => e.id),
+      emoji_ids: [],
     });
     setDraft('');
-    setStagedEmojis([]);
     setPickerOpen(false);
-  }, [draft, friendId, me, messagesKey, queryClient, sendWs, stagedEmojis]);
+  }, [draft, friendId, me, messagesKey, queryClient, sendWs]);
+
+  // Click-to-send: emoji picker now fires off a one-emoji message
+  // immediately and auto-closes the popover. Backend rejects empty
+  // content, so we use the emoji's name as the visible fallback for
+  // receivers who can't resolve emoji_ids → image yet.
+  const sendEmoji = useCallback(
+    (emoji: EmojiView) => {
+      if (!me) return;
+      const clientId = makeClientId();
+      const optimistic: MessageView = {
+        id: clientId,
+        from_user_id: me.id,
+        to_user_id: friendId,
+        content: emoji.name,
+        is_deleted: false,
+        emoji_ids: [emoji.id],
+        created_at: new Date().toISOString(),
+        pending: true,
+        clientId,
+      };
+      queryClient.setQueryData<MessageView[]>(messagesKey, (prev) => [
+        ...(prev ?? []),
+        optimistic,
+      ]);
+      sendWs({
+        type: 'message',
+        to_user_id: friendId,
+        content: emoji.name,
+        emoji_ids: [emoji.id],
+      });
+      setPickerOpen(false);
+    },
+    [friendId, me, messagesKey, queryClient, sendWs],
+  );
 
   // ── Virtuoso refs ──
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -301,6 +372,7 @@ export function ChatWindow({ friendId }: ChatWindowProps) {
                 key={m.id}
                 message={m}
                 mine={me ? m.from_user_id === me.id : false}
+                emojiById={emojiById}
               />
             )}
             components={{
@@ -337,24 +409,6 @@ export function ChatWindow({ friendId }: ChatWindowProps) {
         )}
       </div>
 
-      {stagedEmojis.length > 0 && (
-        <div className="px-4 py-1 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex flex-wrap gap-1">
-          {stagedEmojis.map((e, i) => (
-            <button
-              key={`${e.id}-${i}`}
-              type="button"
-              onClick={() =>
-                setStagedEmojis((s) => s.filter((_, j) => j !== i))
-              }
-              className="text-xs rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 hover:bg-red-50 dark:hover:bg-red-950"
-              title="点击移除"
-            >
-              {e.name} ×
-            </button>
-          ))}
-        </div>
-      )}
-
       <footer className="border-t border-slate-200 dark:border-slate-800 p-3 shrink-0 relative">
         <div className="flex items-end gap-2">
           <button
@@ -389,12 +443,7 @@ export function ChatWindow({ friendId }: ChatWindowProps) {
         </div>
         {pickerOpen && (
           <div className="absolute bottom-full left-3 mb-2 z-20">
-            <EmojiPicker
-              onPick={(emoji) => {
-                setStagedEmojis((s) => [...s, emoji]);
-                // Don't auto-close so users can pick several in a row.
-              }}
-            />
+            <EmojiPicker onPick={sendEmoji} />
           </div>
         )}
       </footer>
@@ -406,8 +455,43 @@ export function ChatWindow({ friendId }: ChatWindowProps) {
 // Sub-components
 // ────────────────────────────────────────────────────────────────────────
 
-function MessageRow({ message, mine }: { message: MessageView; mine: boolean }) {
+function MessageRow({
+  message,
+  mine,
+  emojiById,
+}: {
+  message: MessageView;
+  mine: boolean;
+  emojiById: Map<string, EmojiView>;
+}) {
   const align = mine ? 'justify-end' : 'justify-start';
+  // Single-emoji messages render as a borderless image bubble — feels
+  // closer to a sticker than a text reply. Multi-emoji or text+emoji
+  // messages keep the regular bubble; we'll address those when the
+  // UX calls for it.
+  const singleEmoji =
+    !message.is_deleted && message.emoji_ids.length === 1
+      ? emojiById.get(message.emoji_ids[0])
+      : undefined;
+
+  if (singleEmoji) {
+    return (
+      <div className={`px-4 py-1 flex ${align}`}>
+        <div
+          className={`p-1 ${message.pending ? 'opacity-60' : ''}`}
+          title={new Date(message.created_at).toLocaleString()}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={singleEmoji.thumbnail_url ?? singleEmoji.file_url}
+            alt={singleEmoji.name}
+            className="w-20 h-20 object-contain"
+          />
+        </div>
+      </div>
+    );
+  }
+
   const bg = mine
     ? 'bg-blue-600 text-white'
     : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100';
