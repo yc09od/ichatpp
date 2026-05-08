@@ -581,15 +581,15 @@ ichatpp 选择 **Coolify**（开源自托管 PaaS，类 Vercel/Heroku 体验）�
 3. 一键部署 Postgres / Redis / MinIO，避免重复造轮子
 4. 通过 Dockerfile 自动构建（无需手动 push 镜像），git push → 自动重新部署
 
-**拓扑（单域名同源）：**
+**拓扑（同源父域 + 子域分流）：**
 
 ```
 Internet (HTTPS / WSS)
         ↓
-   Coolify Proxy (Caddy/Traefik，自动签 Let's Encrypt)
-        ├── /api/*    → Rust backend (Dockerfile.backend)
-        ├── /api/ws   → 同上（WSS 升级由代理透传）
-        └── /*        → Next.js frontend (Dockerfile.frontend)
+   Coolify Proxy (Traefik，自动签 Let's Encrypt)
+        ├── chat.example.com         → Next.js frontend (Dockerfile.frontend)
+        └── api.chat.example.com     → Rust backend  (Dockerfile.backend)
+            └── /api/ws              （WSS 升级由 Traefik 透传）
                        ↓
               ┌────────┼────────┐
               ↓        ↓        ↓
@@ -597,11 +597,12 @@ Internet (HTTPS / WSS)
         （Coolify 内置 service，独立 Docker 容器）
 ```
 
-**关键设计：单域名同源**
-- 前后端共享同一个域名（如 `chat.example.com`），由 Coolify 代理按路径分流
-- 消除 CORS 配置（FRONTEND_ORIGIN 与 API origin 同域）
-- 所有 cookie（access / refresh / csrf）天然 same-site，`SameSite=Lax` 即可
-- WebSocket 也走同一域名 `wss://chat.example.com/api/ws`
+**关键设计：父域 + 子域分流**
+- Frontend 在主域 `chat.example.com`，backend 在子域 `api.chat.example.com`
+- Traefik 按 Host 路由，**不碰 path**——避开了 Coolify Traefik 默认 stripprefix 的坑（曾尝试过 path 分流 `/api/*`，Traefik 把 `/api` 砍掉，后端 `web::scope("/api/auth")` 路由失配 + `is_exempt_path` CSRF 豁免失效）
+- Cookie 写在父域 `chat.example.com`，前端 JS（主域）和后端（api 子域）都能读写——`SameSite=Lax` 在 eTLD+1 一致的跨子域请求里允许携带
+- 同源父域意味着 CORS 仍要配（前后端 origin 不同），但 actix-cors + `Access-Control-Allow-Credentials: true` 可以让 cookie 跨子域流转
+- WebSocket 走 `wss://api.chat.example.com/api/ws`
 
 ### 7.2 Coolify 配置清单
 
@@ -625,10 +626,11 @@ Internet (HTTPS / WSS)
 **Coolify 路由规则（Domain → Service）：**
 
 ```
-chat.example.com
-  ├── /api/*  → ichatpp-backend:8080   (Caddy: reverse_proxy + WebSocket upgrade)
-  └── /*      → ichatpp-frontend:3000  (Caddy: reverse_proxy)
+chat.example.com         → ichatpp-frontend:3000   (Traefik: reverse_proxy)
+api.chat.example.com     → ichatpp-backend:8080    (Traefik: reverse_proxy + WebSocket upgrade)
 ```
+
+两个域名在 Coolify 各自的 application 里独立配置；Traefik 按 Host 路由互不干扰，path 原样转发给后端。
 
 ### 7.3 环境变量与密钥管理
 
@@ -642,8 +644,8 @@ chat.example.com
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | （从 MinIO 控制台生成） | 一次性配置 |
 | `JWT_PRIVATE_KEY_PATH` | `/run/secrets/jwt-private.pem` | 持久卷或 Coolify Secret 文件 |
 | `JWT_PUBLIC_KEY_PATH` | `/run/secrets/jwt-public.pem` | 同上 |
-| `FRONTEND_ORIGIN` | `https://chat.example.com` | 单域名同源 |
-| `COOKIE_DOMAIN` | `chat.example.com` | 单域名同源 |
+| `FRONTEND_ORIGIN` | `https://chat.example.com` | actix-cors allow-list（前端主域） |
+| `COOKIE_DOMAIN` | `chat.example.com` | **父域**——覆盖 frontend 主域 + backend api 子域 |
 | `COOKIE_SECURE` | `true` | 生产必须 HTTPS |
 | `BIND_ADDR` | `0.0.0.0:8080` | Coolify 容器内监听 |
 | `RUST_LOG` | `info` | 生产日志级别 |
@@ -652,8 +654,10 @@ chat.example.com
 
 | Key | 值示例 |
 |-----|--------|
-| `NEXT_PUBLIC_API_BASE_URL` | `https://chat.example.com`（同源） |
-| `NEXT_PUBLIC_WS_URL` | `wss://chat.example.com/api/ws` |
+| `NEXT_PUBLIC_API_BASE_URL` | `https://api.chat.example.com`（backend 子域） |
+| `NEXT_PUBLIC_WS_URL` | `wss://api.chat.example.com/api/ws` |
+
+> **必须是 Build Variable**：`NEXT_PUBLIC_*` 在 [`Dockerfile.frontend`](../frontend/Dockerfile.frontend) 里通过 `ARG` 编译进 JS bundle，运行时改 env 不生效。在 Coolify 里需勾选 "Available at Build Time" 后 Force Rebuild。
 
 **JWT 密钥注入策略**（关键技术决策，见 ADR）：
 
@@ -668,7 +672,7 @@ JWT RS256 私钥不能进 git 仓库，且必须在容器重建后保留。两�
 
 1. 在 Coolify 创建项目 `ichatpp`，添加 3 个 service（Postgres / Redis / MinIO）
 2. 添加 2 个 application（backend / frontend），指向 git 仓库 + 各自 Dockerfile
-3. 配置环境变量 + 域名（单域名 `chat.example.com`，路径分流）
+3. 配置环境变量 + 域名（前端主域 `chat.example.com`、后端子域 `api.chat.example.com`，子域分流）
 4. **后端首次启动前**：在 Coolify 终端执行
    - `openssl genpkey -algorithm RSA -out /run/secrets/jwt-private.pem -pkeyopt rsa_keygen_bits:2048`
    - `openssl rsa -in /run/secrets/jwt-private.pem -pubout -out /run/secrets/jwt-public.pem`

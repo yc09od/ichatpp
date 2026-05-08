@@ -23,7 +23,7 @@
 - **包管理**：
   - 前端：npm + package-lock.json
   - 后端：Cargo + Cargo.lock
-- **生产部署平台**：Coolify（自托管 PaaS）。单域名同源（前后端共享 `chat.example.com`，由 Coolify Caddy/Traefik 按 `/api/*` vs `/*` 路径分流），消除 CORS、cookie 天然 same-site。备选：手写 Nginx + docker-compose
+- **生产部署平台**：Coolify（自托管 PaaS）。前端 `chat.example.com`、后端 `api.chat.example.com`（同 eTLD+1 父域），Traefik 按 Host 分流；cookie 写在父域共享、`SameSite=Lax` 跨子域可携带。详见 [docs/DEPLOYMENT.md §4](docs/DEPLOYMENT.md)。备选：手写 Nginx + docker-compose
 - **测试要求**：
   - 前端：单元测试覆盖率 > 60%
   - 后端：单元测试覆盖率 > 80%
