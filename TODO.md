@@ -228,9 +228,10 @@
 
 ## 阶段 7：测试、文档与部署
 
--- [47] [ ] **后端单元测试 ≥ 80%**
+-- [47] [x] **后端单元测试 ≥ 80%**
   - AI 指令：为 handlers 与 db 模块补充 sqlx 集成测试（用 testcontainers 起 postgres）；为 jwt、邀请码 hash、密码 bcrypt 写纯单元测试；目标行覆盖率 ≥ 80%
   - 验收标准：`cargo tarpaulin` 输出 ≥ 80%
+  - 完成状态（2026-05-07）：行覆盖率 **81.55%**（`cargo llvm-cov` —— tarpaulin 在 Windows 不稳定）；327 个测试全绿。集成测试通过 `sqlx::test`（per-test fresh DB）+ docker-compose 的 Redis/MinIO 实现。详见 `tests/common/mod.rs` 与 `tests/{auth,friends,invitations,users,messages,emojis}.rs`。剩余未覆盖主要在 `ws/{chat,broadcast,session}.rs`（需要真实 WS 客户端），后续 [49] e2e 阶段可触达
 
 -- [48] [ ] **前端单元测试 ≥ 60%**
   - AI 指令：使用 Vitest + React Testing Library 测试关键组件（ChatWindow、ContactList、EmojiPicker、表单校验）；mock fetch 与 WebSocket
@@ -266,5 +267,5 @@
 
 ---
 
-*最后更新：2026-05-07（前端阶段六完成 — 聊天/搜索/表情/管理员）*
-*下一个待处理任务：[47] 后端单元测试 ≥ 80%*
+*最后更新：2026-05-07（[47] 后端测试覆盖率 81.55% 达标）*
+*下一个待处理任务：[48] 前端单元测试 ≥ 60%*
