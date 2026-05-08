@@ -672,7 +672,7 @@ JWT RS256 私钥不能进 git 仓库，且必须在容器重建后保留。两�
 4. **后端首次启动前**：在 Coolify 终端执行
    - `openssl genpkey -algorithm RSA -out /run/secrets/jwt-private.pem -pkeyopt rsa_keygen_bits:2048`
    - `openssl rsa -in /run/secrets/jwt-private.pem -pubout -out /run/secrets/jwt-public.pem`
-5. 启动后端 → Coolify 自动跑迁移（在 Dockerfile entrypoint 中 `sqlx migrate run`）
+5. 启动后端 → backend 启动时自动跑迁移（`main.rs` 里 `sqlx::migrate!("./migrations").run(&db)`，SQL 编译期嵌入二进制）
 6. **创建初始管理员**：在 Coolify 终端执行 `./seed_admin --email a@b.c --password <pwd>`
 7. **MinIO 桶初始化**：进 MinIO console 创建 `avatars` / `emojis` / `exports` 桶，对前两个设置匿名 download 策略（与 docker-compose.yml 的 `minio-init` 等价）
 

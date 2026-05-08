@@ -31,6 +31,17 @@ async fn main() -> anyhow::Result<()> {
         .acquire_timeout(std::time::Duration::from_secs(5))
         .connect_lazy(&cfg.database_url)?;
 
+    // Run pending migrations on every boot. The macro embeds the SQL
+    // files in the binary at compile time, so deploys to PaaS like
+    // Coolify don't need sqlx-cli (or any other runtime tool) on the
+    // image. This forces a real DB connection, which is the right
+    // posture: if the DB is unreachable we want to fail boot, not the
+    // first request.
+    sqlx::migrate!("./migrations")
+        .run(&db)
+        .await
+        .map_err(|e| anyhow::anyhow!("running migrations failed: {e}"))?;
+
     let redis = redis::Client::open(cfg.redis_url.clone())?;
 
     // Loaded eagerly: a missing or malformed key is fatal — without it we

@@ -160,20 +160,17 @@ docker exec -it <minio-container> sh -c '
 '
 ```
 
-## 7. 启动 + 跑迁移 + 创建管理员
+## 7. 启动 + 创建管理员
 
 1. Coolify backend application → **Deploy**。Coolify 拉 git → docker build → 启动容器
-2. 启动成功后，进 backend Terminal 执行：
+2. **数据库迁移在 backend 启动时自动跑**（[`main.rs`](../backend/src/main.rs) 里 `sqlx::migrate!("./migrations").run(&db)`，迁移 SQL 在编译期嵌入二进制，runner 镜像不需要 sqlx-cli）。
+3. 启动成功后，在 Coolify backend application 的 Terminal 里创建初始管理员：
 
 ```bash
-# 数据库迁移（如果 Dockerfile 没有 entrypoint 自动跑）
-sqlx migrate run --database-url "$DATABASE_URL"
-
-# 创建初始管理员
-./seed_admin --email admin@your.domain --password 'Admin12345!'
+/app/seed_admin --email admin@your.domain --password 'Admin12345!'
 ```
 
-3. 启动 frontend application → Deploy
+4. 启动 frontend application → Deploy
 
 ## 8. 验证
 
@@ -330,11 +327,12 @@ sudo certbot --nginx -d chat.example.com
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-## 7. 跑迁移 + 建管理员
+## 7. 建管理员
+
+迁移在 backend 启动时自动跑（见 [`main.rs`](../backend/src/main.rs)），所以这里只需要建管理员：
 
 ```bash
-docker compose -f docker-compose.prod.yml exec backend sqlx migrate run
-docker compose -f docker-compose.prod.yml exec backend ./seed_admin --email a@b.c --password Admin12345
+docker compose -f docker-compose.prod.yml exec backend /app/seed_admin --email a@b.c --password Admin12345
 ```
 
 ## 8. 验证 同 A 路径 §8
