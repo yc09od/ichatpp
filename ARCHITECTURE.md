@@ -572,28 +572,147 @@ CREATE INDEX idx_invitations_expires_at ON invitations(expires_at);
 - 前端热重载 (Next.js)
 - 后端使用 `cargo watch` 热重载
 
-**生产环境：**
+### 7.1 生产环境（Coolify 自托管，首选）
+
+ichatpp 选择 **Coolify**（开源自托管 PaaS，类 Vercel/Heroku 体验）作为默认生产部署平台。理由：
+
+1. 开源 + 自托管，与项目"开源、可自部署"定位一致
+2. 内置 Caddy/Traefik 反向代理 + 自动 Let's Encrypt 证书，原生支持 WebSocket Upgrade（无需手写 Nginx 配置）
+3. 一键部署 Postgres / Redis / MinIO，避免重复造轮子
+4. 通过 Dockerfile 自动构建（无需手动 push 镜像），git push → 自动重新部署
+
+**拓扑（单域名同源）：**
+
+```
+Internet (HTTPS / WSS)
+        ↓
+   Coolify Proxy (Caddy/Traefik，自动签 Let's Encrypt)
+        ├── /api/*    → Rust backend (Dockerfile.backend)
+        ├── /api/ws   → 同上（WSS 升级由代理透传）
+        └── /*        → Next.js frontend (Dockerfile.frontend)
+                       ↓
+              ┌────────┼────────┐
+              ↓        ↓        ↓
+         Postgres   Redis    MinIO
+        （Coolify 内置 service，独立 Docker 容器）
+```
+
+**关键设计：单域名同源**
+- 前后端共享同一个域名（如 `chat.example.com`），由 Coolify 代理按路径分流
+- 消除 CORS 配置（FRONTEND_ORIGIN 与 API origin 同域）
+- 所有 cookie（access / refresh / csrf）天然 same-site，`SameSite=Lax` 即可
+- WebSocket 也走同一域名 `wss://chat.example.com/api/ws`
+
+### 7.2 Coolify 配置清单
+
+**应用资源（Application）×2：**
+
+| 资源 | 类型 | 来源 | 端口 | 备注 |
+|------|------|------|------|------|
+| `ichatpp-backend` | Dockerfile | git 仓库 + `Dockerfile.backend` | 8080 | 基础镜像 `debian:slim`，多阶段构建 |
+| `ichatpp-frontend` | Dockerfile | git 仓库 + `Dockerfile.frontend` | 3000 | Next.js standalone 输出 |
+
+**数据资源（Database / Service）×3：**
+
+| 资源 | Coolify 模板 | 持久卷 | 暴露 |
+|------|------|------|------|
+| `ichatpp-postgres` | Postgres 14 | `pgdata` | 仅内网 |
+| `ichatpp-redis` | Redis 6 + password | `redisdata` | 仅内网 |
+| `ichatpp-minio` | MinIO | `miniodata` | 内网 + 可选公开 console |
+
+> 替代：MinIO 可换成外部 S3（AWS / Cloudflare R2 / Backblaze B2），仅需调整 `S3_ENDPOINT` 环境变量。
+
+**Coolify 路由规则（Domain → Service）：**
+
+```
+chat.example.com
+  ├── /api/*  → ichatpp-backend:8080   (Caddy: reverse_proxy + WebSocket upgrade)
+  └── /*      → ichatpp-frontend:3000  (Caddy: reverse_proxy)
+```
+
+### 7.3 环境变量与密钥管理
+
+**Backend（在 Coolify Environment Variables 面板设置）：**
+
+| Key | 值示例 | 来源 |
+|-----|--------|------|
+| `DATABASE_URL` | `postgresql://ichatpp:<pwd>@ichatpp-postgres:5432/ichatpp` | Coolify Postgres 资源生成 |
+| `REDIS_URL` | `redis://:<pwd>@ichatpp-redis:6379` | Coolify Redis 资源生成 |
+| `S3_ENDPOINT` | `http://ichatpp-minio:9000` | Coolify 内部 DNS |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | （从 MinIO 控制台生成） | 一次性配置 |
+| `JWT_PRIVATE_KEY_PATH` | `/run/secrets/jwt-private.pem` | 持久卷或 Coolify Secret 文件 |
+| `JWT_PUBLIC_KEY_PATH` | `/run/secrets/jwt-public.pem` | 同上 |
+| `FRONTEND_ORIGIN` | `https://chat.example.com` | 单域名同源 |
+| `COOKIE_DOMAIN` | `chat.example.com` | 单域名同源 |
+| `COOKIE_SECURE` | `true` | 生产必须 HTTPS |
+| `BIND_ADDR` | `0.0.0.0:8080` | Coolify 容器内监听 |
+| `RUST_LOG` | `info` | 生产日志级别 |
+
+**Frontend：**
+
+| Key | 值示例 |
+|-----|--------|
+| `NEXT_PUBLIC_API_BASE_URL` | `https://chat.example.com`（同源） |
+| `NEXT_PUBLIC_WS_URL` | `wss://chat.example.com/api/ws` |
+
+**JWT 密钥注入策略**（关键技术决策，见 ADR）：
+
+JWT RS256 私钥不能进 git 仓库，且必须在容器重建后保留。两种方案：
+
+1. **持久卷挂载（推荐）**：在 Coolify 给 backend 应用挂载一个持久卷到 `/run/secrets`，**首次部署时**通过 Coolify 终端跑一次 `openssl genpkey ...` 生成密钥对，之后永远复用
+2. **Coolify Secrets 文件**：把 PEM 内容粘到 Coolify 的 Secret 字段（多行环境变量），容器启动时由 entrypoint 脚本写入文件
+
+两种方案 backend 代码无需改动（`JWT_PRIVATE_KEY_PATH` 指向哪儿都行）。
+
+### 7.4 首次部署流程
+
+1. 在 Coolify 创建项目 `ichatpp`，添加 3 个 service（Postgres / Redis / MinIO）
+2. 添加 2 个 application（backend / frontend），指向 git 仓库 + 各自 Dockerfile
+3. 配置环境变量 + 域名（单域名 `chat.example.com`，路径分流）
+4. **后端首次启动前**：在 Coolify 终端执行
+   - `openssl genpkey -algorithm RSA -out /run/secrets/jwt-private.pem -pkeyopt rsa_keygen_bits:2048`
+   - `openssl rsa -in /run/secrets/jwt-private.pem -pubout -out /run/secrets/jwt-public.pem`
+5. 启动后端 → Coolify 自动跑迁移（在 Dockerfile entrypoint 中 `sqlx migrate run`）
+6. **创建初始管理员**：在 Coolify 终端执行 `./seed_admin --email a@b.c --password <pwd>`
+7. **MinIO 桶初始化**：进 MinIO console 创建 `avatars` / `emojis` / `exports` 桶，对前两个设置匿名 download 策略（与 docker-compose.yml 的 `minio-init` 等价）
+
+### 7.5 多实例与水平扩展
+
+backend 已经为多实例设计（见 §4.7 Pub/Sub 与 SessionRegistry）：
+- WebSocket 在线状态通过 Redis Pub/Sub 跨实例广播
+- 无需 sticky session
+- Coolify 当前不原生支持滚动多副本，可手动开多个 application 共享同一组数据资源
+
+垂直扩展（单实例加资源）通常已经足够 MVP 至中等用户量。
+
+### 7.6 备份与监控
+
+- **Postgres 备份**：Coolify 内置定时备份，建议每日全量
+- **MinIO 备份**：复制 `miniodata` 卷或开启 MinIO 自身的桶级版本控制
+- **JWT 密钥备份**：私钥泄漏 = 全部 token 失效（重新签发即可），但**密钥丢失** = 全用户被迫重新登录；应单独备份 `/run/secrets/`
+- **监控**：Coolify 提供基础容器健康检查，详细业务指标（消息量、在线数）后续接 Prometheus
+
+### 7.7 备选方案：Nginx + 手动 docker-compose
+
+若不使用 Coolify，可走传统路径：
+
 ```
 Internet
     ↓
-CDN (可选)
-    ↓
 Nginx (反向代理、SSL)
     ↓
-Load Balancer (可选，多实例时)
+Next.js Server (多实例) + Rust Server (多实例)
     ↓
-Next.js Server (多实例)
-Rust Server (多实例)
-    ↓
-PostgreSQL (主从复制)
-Redis (Cluster)
-S3/MinIO
+PostgreSQL + Redis + MinIO/S3
 ```
 
-**容器化：**
-- Dockerfile 分多阶段构建（减小镜像体积）
-- Docker Compose 定义完整栈
-- GitHub Actions 自动构建和推送到镜像仓库
+由 `docs/DEPLOYMENT.md`（TODO [52]）提供两种路径的具体步骤。
+
+### 7.8 容器化
+
+- `Dockerfile.backend` / `Dockerfile.frontend` 多阶段构建（TODO [53]）
+- `docker-compose.yml` 仅用于本地开发；生产由 Coolify 直接读 Dockerfile
+- GitHub Actions：跑 CI（lint / test）；推送镜像非必需，因 Coolify 直接拉 git
 
 ## 8. 安全考虑
 

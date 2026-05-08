@@ -1,0 +1,67 @@
+# Multi-stage Rust build for ichatpp backend.
+# Goal: < 200 MB final image with no toolchain.
+#
+# Stage 1 — `chef-planner` and `chef-cacher` use cargo-chef so adding a new
+# `Cargo.toml` dep doesn't blow the layer cache for unrelated source edits.
+# Stage 2 — `builder` compiles in --release mode against the cached deps.
+# Stage 3 — `runner` is a slim debian image with only the binary + the
+# system libs (CA certs, libssl) the rust-s3 runtime resolver needs.
+
+# ─────────────────────────── 1. dependency planner ───────────────────────────
+FROM rust:1.82-bookworm AS chef-planner
+RUN cargo install cargo-chef --locked --version 0.1.68
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY migrations ./migrations
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ─────────────────────────── 2. dep build cache ──────────────────────────────
+FROM rust:1.82-bookworm AS chef-cacher
+RUN cargo install cargo-chef --locked --version 0.1.68
+WORKDIR /app
+COPY --from=chef-planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# ─────────────────────────── 3. final builder ────────────────────────────────
+FROM rust:1.82-bookworm AS builder
+WORKDIR /app
+COPY --from=chef-cacher /app/target target
+COPY --from=chef-cacher $CARGO_HOME $CARGO_HOME
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY migrations ./migrations
+RUN cargo build --release --bin ichatpp --bin seed_admin
+
+# ─────────────────────────── 4. runtime image ────────────────────────────────
+# debian:bookworm-slim ≈ 80 MB; final with binary + libs sits around 130 MB.
+FROM debian:bookworm-slim AS runner
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libssl3 \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root for production posture. JWT keys at /run/secrets are mounted in
+# read-only by the orchestrator (Coolify persistent volume) and chowned to
+# this uid via the platform.
+RUN groupadd --system --gid 1000 ichatpp \
+ && useradd  --system --uid 1000 --gid ichatpp --create-home ichatpp
+
+WORKDIR /app
+COPY --from=builder /app/target/release/ichatpp     /app/ichatpp
+COPY --from=builder /app/target/release/seed_admin  /app/seed_admin
+COPY migrations /app/migrations
+
+USER ichatpp
+EXPOSE 8080
+
+# Health check matches the /api/health endpoint.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fsS http://localhost:8080/api/health || exit 1
+
+# Default command runs the server. seed_admin is invoked manually via
+# `docker exec ... /app/seed_admin --email ... --password ...`.
+ENV RUST_LOG=info,ichatpp=info
+CMD ["/app/ichatpp"]

@@ -5,7 +5,7 @@
 
 ## 项目快速摘要
 
-**ichatpp** 是一个开源的 Web 实时通讯应用，类似微信。**核心特性：** 用户必须使用邀请码注册（仅管理员可生成），登录使用 email + password，已注册用户可通过账号码（10 位数字）添加好友、进行实时文字聊天、自动保存消息记录、上传自定义表情。前端采用 **Next.js（App Router）+ TypeScript + Tailwind CSS + TanStack Query + 浏览器原生 WebSocket**（不使用 Socket.io，不使用 Next Auth），后端采用 **Rust + Actix-web + actix-ws（WebSocket，Session + MessageStream，不使用 actor 模型）+ SQLx + JWT**。数据存储使用 **PostgreSQL**、缓存使用 **Redis**、对象存储使用 **MinIO/S3**。项目目前处于 MVP 开发阶段。
+**ichatpp** 是一个开源的 Web 实时通讯应用，类似微信。**核心特性：** 用户必须使用邀请码注册（仅管理员可生成），登录使用 email + password，已注册用户可通过账号码（10 位数字）添加好友、进行实时文字聊天、自动保存消息记录、上传自定义表情。前端采用 **Next.js（App Router）+ TypeScript + Tailwind CSS + TanStack Query + 浏览器原生 WebSocket**（不使用 Socket.io，不使用 Next Auth），后端采用 **Rust + Actix-web + actix-ws（WebSocket，Session + MessageStream，不使用 actor 模型）+ SQLx + JWT**。数据存储使用 **PostgreSQL**、缓存使用 **Redis**、对象存储使用 **MinIO/S3**。**生产部署目标平台：Coolify（开源自托管 PaaS）**，单域名同源拓扑（Caddy/Traefik 按路径分流前后端），见 ARCHITECTURE.md §7。项目目前处于 MVP 开发阶段。
 
 ## 技术约束
 
@@ -23,6 +23,7 @@
 - **包管理**：
   - 前端：npm + package-lock.json
   - 后端：Cargo + Cargo.lock
+- **生产部署平台**：Coolify（自托管 PaaS）。单域名同源（前后端共享 `chat.example.com`，由 Coolify Caddy/Traefik 按 `/api/*` vs `/*` 路径分流），消除 CORS、cookie 天然 same-site。备选：手写 Nginx + docker-compose
 - **测试要求**：
   - 前端：单元测试覆盖率 > 60%
   - 后端：单元测试覆盖率 > 80%
@@ -118,6 +119,7 @@
 | 并发消息处理没有测试 | 高负载场景 | 中 | 需要压力测试验证 |
 | 没有审计日志 | 安全性、合规性 | 低 | 后续考虑添加 |
 | 管理员权限系统还很基础 | 权限控制 | 低 | 当前仅支持 user/admin，后续可扩展为 RBAC |
+| Coolify 部署中 JWT 私钥需挂载持久卷 | 容器重建后 token 失效风险 | 中 | 见 ARCHITECTURE.md §7.3；首次部署需 `openssl genpkey` 一次后挂卷长期复用 |
 
 ## 工作流和沟通约定
 
@@ -167,5 +169,5 @@
 
 ---
 
-*最后更新：2026-05-07（同步 scaffold-project-update：WebSocket 实现从 actix-web-actors 迁移到 actix-ws；前次更新基于全部 md 文件生成 TODO.md，55 条任务覆盖阶段 0–7）*
+*最后更新：2026-05-07（同步 scaffold-project-update：生产部署平台定为 Coolify，ARCHITECTURE.md §7 重写为 Coolify 单域名同源方案 + Nginx 备选）*
 *维护者：ichatpp 开发团队*
