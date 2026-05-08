@@ -123,6 +123,8 @@ mod tests {
             // to S3 so the dummy values from `cfg` are sufficient.
             storage: crate::services::storage::ObjectStore::from_config(&cfg)
                 .expect("test object store"),
+            session_registry: crate::ws::registry::SessionRegistry::new(),
+            instance_id: Uuid::new_v4(),
             config: Arc::new(cfg),
         }
     }

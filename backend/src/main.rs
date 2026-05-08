@@ -5,6 +5,7 @@ mod handlers;
 mod middleware;
 mod responses;
 mod services;
+mod ws;
 
 use std::sync::Arc;
 
@@ -16,6 +17,7 @@ use sqlx::postgres::PgPoolOptions;
 use crate::auth::jwt::Keys;
 use crate::config::Config;
 use crate::services::storage::ObjectStore;
+use crate::ws::registry::SessionRegistry;
 
 /// Application state shared across all handlers.
 ///
@@ -32,6 +34,11 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub jwt_keys: Keys,
     pub storage: ObjectStore,
+    /// Process-wide registry of live WS sessions (TODO [27]).
+    pub session_registry: SessionRegistry,
+    /// Random per-process id used to filter out a publisher's own
+    /// Pub/Sub echoes in the presence broadcast path (TODO [27]).
+    pub instance_id: uuid::Uuid,
 }
 
 #[get("/api/health")]
@@ -71,7 +78,19 @@ async fn main() -> anyhow::Result<()> {
         config: Arc::new(cfg),
         jwt_keys,
         storage,
+        session_registry: SessionRegistry::new(),
+        instance_id: uuid::Uuid::new_v4(),
     };
+
+    // Spawn the cross-instance presence subscriber. It owns its own
+    // Pub/Sub connection and reconnects with back-off on transient
+    // failures; sharing the AppState clone keeps it pinned to the same
+    // session_registry / instance_id the request handlers see.
+    actix_web::rt::spawn(ws::broadcast::run_subscriber(state.clone()));
+
+    // Same shape as the presence subscriber — separate channel
+    // (chat_events) and target-tagged routing instead of friend fan-out.
+    actix_web::rt::spawn(ws::chat::run_subscriber(state.clone()));
 
     // Governor configs are constructed once; each worker calls `Governor::new`
     // against the same config so token-bucket state is shared.
@@ -99,6 +118,11 @@ async fn main() -> anyhow::Result<()> {
             .wrap(cors)
             .wrap(middleware::request_logger())
             .service(health)
+            // Top-level route — WS is a single endpoint, no scope wrapping.
+            // Sits before the /api/auth scope so it's not subject to the
+            // tighter auth-scoped governor; the WS upgrade itself is an
+            // expensive but rare operation.
+            .route("/api/ws", web::get().to(handlers::ws::ws_handler))
             .service(
                 web::scope("/api/auth")
                     .wrap(Governor::new(&auth_gov))
@@ -115,6 +139,15 @@ async fn main() -> anyhow::Result<()> {
             )
             .service(
                 web::scope("/api/users").configure(handlers::users::routes),
+            )
+            .service(
+                web::scope("/api/friends").configure(handlers::friends::routes),
+            )
+            .service(
+                web::scope("/api/messages").configure(handlers::messages::routes),
+            )
+            .service(
+                web::scope("/api/emojis").configure(handlers::emojis::routes),
             )
             .service(
                 web::scope("/api/invitations")

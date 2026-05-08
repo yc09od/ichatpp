@@ -117,6 +117,8 @@ mod tests {
             jwt_keys: Keys::from_pem(PRIV_PEM, PUB_PEM, 3600, 604800).expect("test keys"),
             storage: crate::services::storage::ObjectStore::from_config(&cfg)
                 .expect("test object store"),
+            session_registry: crate::ws::registry::SessionRegistry::new(),
+            instance_id: Uuid::new_v4(),
             config: Arc::new(cfg),
         }
     }

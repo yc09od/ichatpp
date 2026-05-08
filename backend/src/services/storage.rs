@@ -98,6 +98,17 @@ impl ObjectStore {
     pub fn object_url(&self, bucket: &str, key: &str) -> String {
         format!("{}/{}/{}", self.endpoint_base, bucket, key)
     }
+
+    /// DELETE `bucket/key`. S3 returns 204 even if the key didn't exist,
+    /// so this is naturally idempotent — useful for the emoji-delete
+    /// path (TODO [36]) where the DB row may have been removed but the
+    /// object orphaned in a previous half-failed delete.
+    pub async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), S3Error> {
+        let bucket = Bucket::new(bucket, self.region.clone(), self.credentials.clone())?
+            .with_path_style();
+        bucket.delete_object(key).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

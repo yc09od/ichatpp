@@ -120,11 +120,11 @@
   - AI 指令：实现 `GET /api/users`（管理员，分页）和 `PUT /api/users/:user_id/role`（管理员，修改角色）
   - 验收标准：非管理员 403；管理员可将其他用户提升为 admin
 
--- [24] [ ] **好友请求 API**
+-- [24] [x] **好友请求 API**
   - AI 指令：实现 ARCHITECTURE.md 第 4.3 节端点：`POST /api/friends/requests`（按账号码或 user_id，检查不能给自己、不能重复发 pending）、`GET /api/friends/requests/pending`、`PUT /api/friends/requests/:id`（accept 时事务创建 friends 记录，确保 user_id_1 < user_id_2）
   - 验收标准：accept 后双方 `GET /api/friends` 都能看到对方；重复发 pending 返回 409
 
--- [25] [ ] **好友列表与删除 API**
+-- [25] [x] **好友列表与删除 API**
   - AI 指令：`GET /api/friends`（按昵称、最近聊天排序）、`DELETE /api/friends/:friend_id`（删除 friends 行，**消息保留**不删除）
   - 验收标准：删除后双方列表都不再包含对方；历史消息仍可查询
 
@@ -132,23 +132,23 @@
 
 ## 阶段 4：实时通讯（WebSocket）
 
--- [26] [ ] **WebSocket 握手与鉴权**
+-- [26] [x] **WebSocket 握手与鉴权**
   - AI 指令：实现 `GET /api/ws` 升级到 WebSocket（用 `actix_ws::handle(&req, body)` 拿到 `(HttpResponse, Session, MessageStream)`）；握手时从 cookie 读取 `access_token`，验证 JWT；升级成功后启动一个 tokio task 处理入站流，将用户加入 Redis Set `online_users`，并在 task 内维持心跳定时器
   - 验收标准：未登录连接返回 401；登录后连接成功，Redis 中可见 user_id
 
--- [27] [ ] **在线状态广播**
+-- [27] [x] **在线状态广播**
   - AI 指令：用户上线/下线时，查询其好友列表，通过进程内 Session 注册表（`DashMap<UserId, Vec<Sender>>`，每个 Session task 启动时插入 mpsc Sender、退出时移除）向每个在线好友的 Session 推送 `user_online` / `user_offline` 事件；跨实例使用 Redis Pub/Sub 中转
   - 验收标准：A 上线时 A 的所有在线好友都能收到 user_online 事件
 
--- [28] [ ] **消息收发与持久化**
+-- [28] [x] **消息收发与持久化**
   - AI 指令：处理 client → server 的 `message` 事件：(1) 验证发送方与接收方为好友 (2) 校验内容长度 ≤ 5000 (3) 在事务中插入 messages 行（含 emoji 引用插入 message_emojis） (4) 向发送方回 `message_received` 含 message_id (5) 若接收方在线推送 `message`；离线则入 Redis List `offline_messages:{user_id}`
   - 验收标准：A 发消息给在线 B 延迟 < 200ms；B 离线时 A 发的消息在 B 上线后能被 pop 到
 
--- [29] [ ] **离线消息推送**
+-- [29] [x] **离线消息推送**
   - AI 指令：用户上线时检查 `offline_messages:{user_id}` Redis List，全部 LPOP 后通过 WebSocket 推送，推送成功后删除 Redis 列表
   - 验收标准：B 离线期间收到 5 条消息，B 上线后 5 条全部到达且顺序正确
 
--- [30] [ ] **WebSocket 错误处理与心跳**
+-- [30] [x] **WebSocket 错误处理与心跳**
   - AI 指令：实现心跳（30s ping/pong），15s 内未响应断开连接；定义 ARCHITECTURE.md 第 4.7 节的 `error` 事件结构，所有失败场景统一通过 error 事件返回
   - 验收标准：客户端断网 30s 后服务端自动结束对应的 Session task，并从 Session 注册表与 Redis online 集合中清理
 
@@ -156,27 +156,27 @@
 
 ## 阶段 5：消息记录与表情
 
--- [31] [ ] **消息历史查询 API**
+-- [31] [x] **消息历史查询 API**
   - AI 指令：`GET /api/messages/:friend_id?cursor&limit=50`：基于游标分页，按 `(LEAST(from,to), GREATEST(from,to), created_at)` 双向匹配；利用 ARCHITECTURE.md 中的 `idx_messages_conversation` 复合索引
   - 验收标准：1 万条消息历史查询响应 < 500ms
 
--- [32] [ ] **消息搜索 API**
+-- [32] [x] **消息搜索 API**
   - AI 指令：`GET /api/messages/search?q=&from=&to=&date_from=&date_to=`：基于 PostgreSQL full-text search（创建 GIN 索引于 `content` 上的 to_tsvector('simple', content)），返回带高亮片段
   - 验收标准：关键词命中时返回上下文片段；空 q 返回 400
 
--- [33] [ ] **消息软删除**
+-- [33] [x] **消息软删除**
   - AI 指令：`DELETE /api/messages/:message_id`：仅发送者可删除（4xx 否则），将 `is_deleted=true`；查询接口默认过滤 is_deleted
   - 验收标准：删除后双方都看不到该消息内容（占位"消息已撤回"）
 
--- [34] [ ] **聊天记录导出**
+-- [34] [x] **聊天记录导出**
   - AI 指令：`POST /api/messages/export` { friend_id, format: 'json'|'csv', date_from?, date_to? }：流式生成文件，临时存对象存储，返回一次性下载链接（TTL 30 分钟）
   - 验收标准：导出 1000 条消息文件结构正确，能正常下载
 
--- [35] [ ] **表情上传 API**
+-- [35] [x] **表情上传 API**
   - AI 指令：`POST /api/emojis` 接 multipart：PNG/JPG ≤ 500KB；存对象存储 `emojis/{user_id}/{uuid}.{ext}`，生成 100x100 缩略图；同时检查用户表情数 ≤ 100，超出返回 409
   - 验收标准：上传成功返回 emoji 元数据；超过 100 个返回 409
 
--- [36] [ ] **表情查询与删除**
+-- [36] [x] **表情查询与删除**
   - AI 指令：`GET /api/emojis` 返回当前用户表情列表（含缩略图 URL，Redis 缓存 60s）；`DELETE /api/emojis/:id` 删除 DB 行 + 对象存储文件
   - 验收标准：删除后再次 GET 不再返回该项；对象存储中文件已清理
 
@@ -184,43 +184,43 @@
 
 ## 阶段 6：前端实现
 
--- [37] [ ] **认证页面（注册/登录）**
+-- [37] [x] **认证页面（注册/登录）**
   - AI 指令：实现 `app/(auth)/register/page.tsx` 与 `login/page.tsx`：表单使用 React Hook Form + Zod 校验；注册前调用 `/api/invitations/validate` 提前校验邀请码；登录成功后 router.push('/chat')；fetch 必须 `credentials: 'include'`
   - 验收标准：表单错误提示友好；成功后跳转主应用
 
--- [38] [ ] **CSRF 与 fetch 封装**
+-- [38] [x] **CSRF 与 fetch 封装**
   - AI 指令：完善 `frontend/lib/api.ts`：自动从 `csrf_token` cookie 读取并附加 `X-CSRF-Token` 头到所有 mutation；统一错误处理（401 自动调用 refresh）
   - 验收标准：所有受保护 API 调用自动带 CSRF；401 后自动刷新一次再重试
 
--- [39] [ ] **主布局与导航**
+-- [39] [x] **主布局与导航**
   - AI 指令：实现 `app/(app)/layout.tsx`：左侧好友列表 + 右侧聊天窗口的双栏布局（移动端响应式为单栏 + 抽屉）；顶部头像下拉（个人中心、登出）
   - 验收标准：1024px 以上双栏；< 768px 单栏抽屉
 
--- [40] [ ] **好友列表组件**
+-- [40] [x] **好友列表组件**
   - AI 指令：实现 `components/ContactList.tsx`：使用 TanStack Query 拉取 `/api/friends`，显示头像、昵称、在线状态点；支持搜索；点击切换聊天对象
   - 验收标准：在线状态实时更新（监听 WebSocket 事件）
 
--- [41] [ ] **WebSocket 客户端封装**
+-- [41] [x] **WebSocket 客户端封装**
   - AI 指令：完善 `lib/websocket.ts`：单例连接 `wss://.../api/ws`（cookie 自动携带）；自动重连（指数退避，最大 30s）；提供 `send(event, data)` 与基于 EventEmitter 的 `on(event, handler)`；与 React Context 集成
   - 验收标准：断网恢复后能自动重连；多组件订阅同一事件互不干扰
 
--- [42] [ ] **聊天窗口组件**
+-- [42] [x] **聊天窗口组件**
   - AI 指令：实现 `components/ChatWindow.tsx`：消息列表（虚拟滚动，react-virtuoso）+ 输入框；接收实时消息后乐观更新 + TanStack Query 缓存；@mention 弹出好友候选；输入框右侧表情按钮
   - 验收标准：1000 条历史消息滚动流畅；新消息到达自动滚到底部（除非用户向上翻看）
 
--- [43] [ ] **历史消息加载与搜索**
+-- [43] [x] **历史消息加载与搜索**
   - AI 指令：聊天窗口顶部触底（向上滚）触发 `/api/messages/:friend_id?cursor=` 加载更多；顶部搜索按钮打开搜索面板调用 `/api/messages/search`，命中跳转到对应消息
   - 验收标准：无限滚动正常；搜索结果点击能定位到原消息
 
--- [44] [ ] **表情选择器**
+-- [44] [x] **表情选择器**
   - AI 指令：`components/EmojiPicker.tsx`：网格布局展示用户表情，支持上传新表情、删除；点击插入到聊天输入框；与 `/api/emojis` 联动
   - 验收标准：上传后立即出现在选择器；插入到输入框的表情在发送后正确渲染
 
--- [45] [ ] **个人档案与头像上传**
+-- [45] [x] **个人档案与头像上传**
   - AI 指令：实现 `app/(app)/profile/page.tsx`：编辑昵称、签名、可见性；头像上传带裁剪预览
   - 验收标准：保存后头像在好友列表中实时刷新
 
--- [46] [ ] **管理员邀请码界面**
+-- [46] [x] **管理员邀请码界面**
   - AI 指令：实现 `app/(app)/admin/invitations/page.tsx`（仅 admin 可见）：批量生成、列表（masked 视图）、统计、撤销；生成成功立即弹窗显示明文 + 一次性 CSV 下载链接，关闭后无法再取回
   - 验收标准：非 admin 路由跳转到 403 页；下载 CSV 后再次访问 url 报错
 
@@ -266,5 +266,5 @@
 
 ---
 
-*最后更新：2026-05-07（WebSocket 实现迁移到 actix-ws）*
-*下一个待处理任务：[24] 好友请求 API*
+*最后更新：2026-05-07（前端阶段六完成 — 聊天/搜索/表情/管理员）*
+*下一个待处理任务：[47] 后端单元测试 ≥ 80%*
