@@ -2,7 +2,7 @@
 name = "ichatpp"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.85"
 authors = ["ichatpp contributors"]
 license = "MIT"
 description = "ichatpp backend — Rust + Actix-web realtime chat server"
