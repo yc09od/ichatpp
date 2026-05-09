@@ -8,7 +8,10 @@
 # system libs (CA certs, libssl) the rust-s3 runtime resolver needs.
 
 # ─────────────────────────── 1. dependency planner ───────────────────────────
-FROM rust:1.82-bookworm AS chef-planner
+# 1.88+ required: actix-web 4.13, image 0.25, time 0.3.47 and several
+# icu_* crates declare rust-version >= 1.88. We pin to 1.95 (current stable)
+# to leave headroom before the next dep bump nudges MSRV again.
+FROM rust:1.95-bookworm AS chef-planner
 RUN cargo install cargo-chef --locked --version 0.1.68
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
@@ -17,14 +20,14 @@ COPY migrations ./migrations
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ─────────────────────────── 2. dep build cache ──────────────────────────────
-FROM rust:1.82-bookworm AS chef-cacher
+FROM rust:1.95-bookworm AS chef-cacher
 RUN cargo install cargo-chef --locked --version 0.1.68
 WORKDIR /app
 COPY --from=chef-planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 # ─────────────────────────── 3. final builder ────────────────────────────────
-FROM rust:1.82-bookworm AS builder
+FROM rust:1.95-bookworm AS builder
 WORKDIR /app
 COPY --from=chef-cacher /app/target target
 COPY --from=chef-cacher $CARGO_HOME $CARGO_HOME

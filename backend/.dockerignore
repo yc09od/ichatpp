@@ -1,0 +1,33 @@
+# Build artifacts — 19GB locally, would balloon the build context.
+target/
+
+# Secrets — JWT signing keys live here in dev. They're mounted via
+# Coolify persistent volumes in prod, never baked into the image.
+keys/
+
+# Integration tests — Dockerfile only builds --bin ichatpp / seed_admin.
+tests/
+
+# VCS / IDE / OS noise
+.git/
+.gitignore
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local env files (real secrets shouldn't ship into the image layer cache)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Cargo offline cache, if present
+.cargo/registry
+.cargo/git
+
+# Dockerfile itself doesn't need to be in the context (already passed via -f)
+Dockerfile.backend
+.dockerignore

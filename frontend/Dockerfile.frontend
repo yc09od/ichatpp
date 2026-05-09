@@ -13,7 +13,11 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat
 
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# `--include=dev` forces devDependencies even when NODE_ENV=production is
+# set in the build env (Coolify and other PaaS injects this by default,
+# which would otherwise drop tailwindcss/postcss/typescript and break
+# `next build`).
+RUN npm ci --no-audit --no-fund --include=dev
 
 # ─────────────────────────── 2. builder ──────────────────────────────────────
 FROM node:20-alpine AS builder

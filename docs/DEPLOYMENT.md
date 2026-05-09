@@ -19,7 +19,9 @@
 ## 0. 前置准备
 
 - 一台 Linux VPS（≥ 2 GB RAM、≥ 20 GB 磁盘；Ubuntu 22.04 或 Debian 12 推荐）
-- 一个域名（例：`chat.example.com`）— DNS A 记录指向 VPS IP
+- 一个域名 + 两条 A 记录指向 VPS IP（同源子域分流，见 §4）：
+  - `chat.example.com`（前端）
+  - `api.chat.example.com`（后端）
 - 已开放端口 80 / 443
 - 在 VPS 上安装 Coolify（一行命令，详见 [coolify.io/docs](https://coolify.io/docs)）
 - 已 fork 或 clone 本仓库到一个可访问的 git 远程（GitHub / GitLab / 自建 Gitea）
@@ -80,6 +82,9 @@ BIND_ADDR=0.0.0.0:8080
 RUST_LOG=info,ichatpp=info
 
 FRONTEND_ORIGIN=https://chat.example.com
+# 父域，覆盖前端 chat.example.com 与后端 api.chat.example.com 两个子域。
+# 浏览器把 cookie 存在父域上，跨子域请求会自动带上。SameSite=Lax 在
+# eTLD+1 一致的跨子域请求里也允许携带，符合 auth/cookies.rs 的设计。
 COOKIE_DOMAIN=chat.example.com
 COOKIE_SECURE=true
 ```
@@ -102,30 +107,43 @@ COOKIE_SECURE=true
 环境变量：
 
 ```
-NEXT_PUBLIC_API_BASE_URL=https://chat.example.com
-NEXT_PUBLIC_WS_URL=wss://chat.example.com/api/ws
+NEXT_PUBLIC_API_BASE_URL=https://api.chat.example.com
+NEXT_PUBLIC_WS_URL=wss://api.chat.example.com/api/ws
 NODE_ENV=production
 ```
 
-## 4. 配置域名（单域名同源路径分流）
+> ⚠️ `NEXT_PUBLIC_*` 是**编译期**注入（[`Dockerfile.frontend`](../frontend/Dockerfile.frontend) 里 `ARG` + `ENV`），在 Coolify 里**必须勾选 "Build Variable"** / "Available at Build Time"。光改运行时 env 不会生效，必须 Redeploy 触发新一次 docker build。
 
-**关键设计：** 前后端共享一个域名，由 Coolify 的反向代理（Caddy/Traefik）按路径分流，消除 CORS。
+## 4. 配置域名（同源父域 + 子域分流）
 
-在 Coolify 的 backend application 设置 → **Domains**：
+**关键设计**：前端用主域 `chat.example.com`，后端用子域 `api.chat.example.com`。Traefik 按 Host 路由，**不涉及 path**——这样既不用 CORS（cookie 父域共享），又躲开了 Coolify Traefik 默认 stripprefix 的坑（path 路由会把 `/api` 砍掉，后端只看到 `/auth/login` 之类导致 CSRF 中间件拒）。
+
+在 Coolify 的 backend application → **Domains**：
 
 ```
-https://chat.example.com/api
+https://api.chat.example.com
 ```
 
-在 frontend application 设置 → **Domains**：
+在 frontend application → **Domains**：
 
 ```
 https://chat.example.com
 ```
 
-> Coolify 会自动按路径前缀路由：`/api/*` → backend，其余 → frontend。WebSocket 升级（`/api/ws`）由 Caddy 透传。
+> Coolify 给两个域分别签 Let's Encrypt 证书。WebSocket 升级走 `wss://api.chat.example.com/api/ws`，Traefik 默认透传 `Upgrade: websocket`。
 
-> 如果 Coolify UI 没有"路径前缀"选项，则使用一个外部 Caddy/Traefik 容器作为前置反代，或在每个 application 上声明独立子域（`chat.example.com` 与 `api.example.com`），后者需要把 `FRONTEND_ORIGIN` 改成对应值并打开 CORS。
+### 为什么不走"单域名 path 分流"
+
+之前曾试过把 backend 域名配成 `https://chat.example.com/api`，Coolify Traefik 默认会加 stripprefix `/api`。后端实际收到的路径是 `/auth/login` 而不是 `/api/auth/login`，导致：
+
+1. [`middleware/csrf.rs`](../backend/src/middleware/csrf.rs) 的 `is_exempt_path` 精确匹配 `"/api/auth/login"` 失效，所有 POST 请求被 CSRF 中间件拒绝（403 FORBIDDEN）。
+2. `web::scope("/api/auth")` 路由前缀也不再匹配。
+
+两种修法都不如换子域：要么改后端去掉 `/api` 前缀（改动面大，影响 frontend 与 csrf 豁免列表），要么手动覆写 Traefik labels 关掉 stripprefix（Coolify 升级容易丢）。子域是**最干净**的。
+
+### Cookie 跨子域共享
+
+`COOKIE_DOMAIN=chat.example.com`（父域）让 backend 在 `api.chat.example.com` 写下的 cookie 在 `chat.example.com`（前端 JS）也能读到——CSRF 双提交需要 frontend 读 `csrf_token`。`SameSite=Lax` 在 eTLD+1 一致的跨子域请求里允许携带，所以 frontend 调 backend 时 access/refresh cookie 也会自动带上。
 
 ## 5. 生成 JWT 密钥（首次部署一次）
 
@@ -160,26 +178,23 @@ docker exec -it <minio-container> sh -c '
 '
 ```
 
-## 7. 启动 + 跑迁移 + 创建管理员
+## 7. 启动 + 创建管理员
 
 1. Coolify backend application → **Deploy**。Coolify 拉 git → docker build → 启动容器
-2. 启动成功后，进 backend Terminal 执行：
+2. **数据库迁移在 backend 启动时自动跑**（[`main.rs`](../backend/src/main.rs) 里 `sqlx::migrate!("./migrations").run(&db)`，迁移 SQL 在编译期嵌入二进制，runner 镜像不需要 sqlx-cli）。
+3. 启动成功后，在 Coolify backend application 的 Terminal 里创建初始管理员：
 
 ```bash
-# 数据库迁移（如果 Dockerfile 没有 entrypoint 自动跑）
-sqlx migrate run --database-url "$DATABASE_URL"
-
-# 创建初始管理员
-./seed_admin --email admin@your.domain --password 'Admin12345!'
+/app/seed_admin --email admin@your.domain --password 'Admin12345!'
 ```
 
-3. 启动 frontend application → Deploy
+4. 启动 frontend application → Deploy
 
 ## 8. 验证
 
 ```bash
-# 健康检查
-curl -i https://chat.example.com/api/health
+# 健康检查（注意打的是 api 子域，不是前端主域）
+curl -i https://api.chat.example.com/api/health
 # → HTTP/2 200, {"status":"ok"}
 
 # 访问前端
@@ -224,11 +239,24 @@ Coolify 支持 git webhook：仓库 push 触发自动 build + redeploy。在 app
 ### 前端登录后跳回 /login
 通常是 cookie 不生效。检查：
 1. `COOKIE_SECURE=true` 必须配合 HTTPS（确认证书有效）
-2. `COOKIE_DOMAIN` 与实际域名一致
+2. `COOKIE_DOMAIN` 是**父域**（`chat.example.com`），不是 `api.chat.example.com`——否则前端 JS 读不到 `csrf_token`
 3. 浏览器开发者工具 → Application → Cookies 看是否真有 access_token / csrf_token
 
-### WebSocket 升级失败（101 → 502）
-确认 Coolify Caddy/Traefik 配置允许 `Upgrade: websocket` 透传（默认应允许）。如果用了独立反代（Cloudflare 等），开启 WebSocket 选项。
+### POST 请求统一 403 `missing or invalid CSRF token`
+后端实际收到的 path 不带 `/api` 前缀。常见原因：Coolify backend 域名配成 `https://example.com/api`，Traefik 默认 stripprefix 砍掉了 `/api`，导致 [`is_exempt_path`](../backend/src/middleware/csrf.rs) 失效。**修法**：按 §4 改子域 `https://api.example.com`，Traefik 走 Host 路由就不会动 path。
+
+排查命令（在 Coolify 主机 SSH）：
+```bash
+docker logs --tail 30 <backend-container> 2>&1 | grep -E '"POST|"GET'
+# 看 Logger 中间件打的请求行，引号里的 path 就是后端真正看到的。
+# 正确：  "POST /api/auth/login HTTP/1.1" 401
+# 异常：  "POST /auth/login HTTP/1.1"     403  ← Traefik strip 了
+```
+
+### WebSocket 升级失败（pending / 502）
+- 检查 frontend 的 `NEXT_PUBLIC_WS_URL` 是否指向 backend 子域（`wss://api.chat.example.com/api/ws`）。打到前端域只会被 Next.js 容器收到，没有 WS handler，握手卡死。
+- `NEXT_PUBLIC_*` 改了之后**必须 Force Rebuild frontend**（`ARG` 是编译期常量，旧 JS bundle 把老 URL 编进去了）。
+- Traefik 默认透传 `Upgrade: websocket`，不用单独配。Cloudflare 之类前置反代要确认开了 WebSocket。
 
 ### MinIO 上传成功但前端图片打不开
 匿名 download 策略未设置 → `mc anonymous set download local/<bucket>`。
@@ -330,11 +358,12 @@ sudo certbot --nginx -d chat.example.com
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-## 7. 跑迁移 + 建管理员
+## 7. 建管理员
+
+迁移在 backend 启动时自动跑（见 [`main.rs`](../backend/src/main.rs)），所以这里只需要建管理员：
 
 ```bash
-docker compose -f docker-compose.prod.yml exec backend sqlx migrate run
-docker compose -f docker-compose.prod.yml exec backend ./seed_admin --email a@b.c --password Admin12345
+docker compose -f docker-compose.prod.yml exec backend /app/seed_admin --email a@b.c --password Admin12345
 ```
 
 ## 8. 验证 同 A 路径 §8
@@ -360,11 +389,11 @@ docker compose -f docker-compose.prod.yml exec backend ./seed_admin --email a@b.
 | `JWT_REFRESH_TTL_SECONDS` | — | `604800` | |
 | `BIND_ADDR` | — | `0.0.0.0:8080` | |
 | `RUST_LOG` | — | `info` | 生产建议 `info`，调试用 `info,ichatpp=debug` |
-| `FRONTEND_ORIGIN` | ✅ | — | CORS allow-list；单域名同源时仍要填实际值 |
-| `COOKIE_DOMAIN` | ✅ | `localhost` | 必须与生产域名一致 |
+| `FRONTEND_ORIGIN` | ✅ | — | CORS allow-list，填前端域，例如 `https://chat.example.com` |
+| `COOKIE_DOMAIN` | ✅ | `localhost` | 父域名，例如 `chat.example.com`（覆盖前端主域 + `api.` 子域） |
 | `COOKIE_SECURE` | ✅ | `false` | **生产必须 true（要求 HTTPS）** |
-| `NEXT_PUBLIC_API_BASE_URL` | ✅（前端） | — | 单域名同源时填生产域名 |
-| `NEXT_PUBLIC_WS_URL` | ✅（前端） | — | wss://… |
+| `NEXT_PUBLIC_API_BASE_URL` | ✅（前端） | — | 后端子域，例如 `https://api.chat.example.com`。**Build Variable** |
+| `NEXT_PUBLIC_WS_URL` | ✅（前端） | — | `wss://api.chat.example.com/api/ws`。**Build Variable** |
 
 ---
 

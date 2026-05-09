@@ -5,7 +5,7 @@
 
 ## 全局约定
 
-- **Base URL**：开发 `http://localhost:8080`，生产 `https://chat.example.com`（与前端同源）
+- **Base URL**：开发 `http://localhost:8080`，生产 `https://api.chat.example.com`（前端在 `chat.example.com`，后端独立子域，详见 [DEPLOYMENT.md §4](DEPLOYMENT.md)）
 - **认证**：JWT 通过 `Set-Cookie` 写入 **httpOnly + Secure + SameSite=Lax** 的 `access_token`/`refresh_token` cookie；前端 JS 不接触 token
 - **CSRF**：所有 mutation（POST/PUT/PATCH/DELETE，除 `/api/auth/login` 与 `/api/auth/register`）必须附 `X-CSRF-Token` 请求头，值取自 `csrf_token` cookie（**双提交模式**）
 - **Cookie 携带**：浏览器侧必须 `fetch(..., { credentials: 'include' })`

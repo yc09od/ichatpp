@@ -1,0 +1,29 @@
+# Build artifacts and deps — re-installed inside the image.
+node_modules/
+.next/
+out/
+
+# TypeScript incremental cache
+tsconfig.tsbuildinfo
+
+# Local env files (real secrets shouldn't ship into the image layer cache).
+# .env.example is fine to keep if/when it appears.
+.env
+.env.*
+!.env.example
+
+# VCS / IDE / OS noise
+.git/
+.gitignore
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Dockerfile itself doesn't need to be in the context (already passed via -f)
+Dockerfile.frontend
+.dockerignore
